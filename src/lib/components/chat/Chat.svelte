@@ -2632,6 +2632,7 @@
 						}
 						return a;
 					}, [])}
+					{selectedToolIds}
 					{submitPrompt}
 					{stopResponse}
 					{showMessage}

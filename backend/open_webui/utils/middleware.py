@@ -3278,6 +3278,20 @@ async def process_chat_response(
                             tool_type = tool.get("type", "")
                             direct_tool = tool.get("direct", False)
 
+                            # Emit status event for tool execution start
+                            await event_emitter(
+                                {
+                                    "type": "status",
+                                    "data": {
+                                        "action": "tool_call",
+                                        "description": f"Calling {tool_function_name}",
+                                        "tool_name": tool_function_name,
+                                        "tool_id": tool_call_id,
+                                        "done": False,
+                                    },
+                                }
+                            )
+
                             try:
                                 allowed_params = (
                                     spec.get("parameters", {})
@@ -3335,6 +3349,20 @@ async def process_chat_response(
                                 metadata,
                                 user,
                             )
+                        )
+
+                        # Emit status event for tool execution completion
+                        await event_emitter(
+                            {
+                                "type": "status",
+                                "data": {
+                                    "action": "tool_call",
+                                    "description": f"Completed {tool_function_name}",
+                                    "tool_name": tool_function_name,
+                                    "tool_id": tool_call_id,
+                                    "done": True,
+                                },
+                            }
                         )
 
                         # Extract citation sources from tool results

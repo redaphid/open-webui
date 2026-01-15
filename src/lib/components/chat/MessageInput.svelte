@@ -30,6 +30,7 @@
 		toolServers,
 		user as _user,
 		showControls,
+		showActiveTools,
 		TTSWorker,
 		temporaryChatEnabled
 	} from '$lib/stores';
@@ -1572,7 +1573,8 @@
 													aria-label="Available Tools"
 													type="button"
 													on:click={() => {
-														showTools = !showTools;
+														showActiveTools.set(true);
+														showControls.set(true);
 													}}
 												>
 													<Wrench className="size-4" strokeWidth="1.75" />

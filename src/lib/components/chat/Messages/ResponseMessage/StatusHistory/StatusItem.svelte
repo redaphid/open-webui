@@ -3,6 +3,7 @@
 	const i18n = getContext('i18n');
 	import WebSearchResults from '../WebSearchResults.svelte';
 	import Search from '$lib/components/icons/Search.svelte';
+	import Wrench from '$lib/components/icons/Wrench.svelte';
 	import { t } from 'i18next';
 
 	export let status = null;
@@ -120,6 +121,23 @@
 							count: status.count
 						})}
 					{/if}
+				</div>
+			</div>
+		{:else if status?.action === 'tool_call'}
+			<div class="flex items-center gap-2">
+				<Wrench className="size-4 text-gray-500 dark:text-gray-400 flex-shrink-0" />
+				<div class="flex flex-col justify-center -space-y-0.5">
+					<div
+						class="{(done || status?.done) === false
+							? 'shimmer'
+							: ''} text-gray-500 dark:text-gray-500 text-base line-clamp-1 text-wrap"
+					>
+						{#if (done || status?.done) === false}
+							{$i18n.t('Calling {{toolName}}', { toolName: status?.tool_name ?? 'tool' })}
+						{:else}
+							{$i18n.t('Called {{toolName}}', { toolName: status?.tool_name ?? 'tool' })}
+						{/if}
+					</div>
 				</div>
 			</div>
 		{:else}
