@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from typing import Optional
 from contextlib import AsyncExitStack
 
@@ -9,11 +10,13 @@ from mcp.client.auth import OAuthClientProvider, TokenStorage
 from mcp.client.streamable_http import streamablehttp_client
 from mcp.shared.auth import OAuthClientInformationFull, OAuthClientMetadata, OAuthToken
 
+log = logging.getLogger(__name__)
+
 
 class MCPClient:
     def __init__(self):
         self.session: Optional[ClientSession] = None
-        self.exit_stack = None
+        self.exit_stack: Optional[AsyncExitStack] = None
 
     async def connect(self, url: str, headers: Optional[dict] = None):
         async with AsyncExitStack() as exit_stack:
@@ -34,7 +37,9 @@ class MCPClient:
                     await self.session.initialize()
                 self.exit_stack = exit_stack.pop_all()
             except Exception as e:
-                await asyncio.shield(self.disconnect())
+                # Only attempt disconnect if exit_stack was successfully assigned
+                if self.exit_stack is not None:
+                    await asyncio.shield(self.disconnect())
                 raise e
 
     async def list_tool_specs(self) -> Optional[dict]:
@@ -74,7 +79,17 @@ class MCPClient:
         result_content = result_dict.get("content", {})
 
         if result.isError:
-            raise Exception(result_content)
+            # Extract text from content items if available
+            error_msg = result_content
+            if isinstance(result_content, list):
+                text_items = [
+                    item.get("text", "")
+                    for item in result_content
+                    if isinstance(item, dict) and item.get("type") == "text"
+                ]
+                if text_items:
+                    error_msg = "; ".join(text_items)
+            raise Exception(f"MCP tool error: {error_msg}")
         else:
             return result_content
 
@@ -103,13 +118,20 @@ class MCPClient:
         return result_dict
 
     async def disconnect(self):
-        # Clean up and close the session
-        await self.exit_stack.aclose()
+        """Clean up and close the session."""
+        if self.exit_stack is not None:
+            try:
+                await self.exit_stack.aclose()
+            except Exception as e:
+                log.debug(f"Error during MCP client disconnect: {e}")
+            finally:
+                self.exit_stack = None
+                self.session = None
 
     async def __aenter__(self):
-        await self.exit_stack.__aenter__()
+        """Async context manager entry - note: connect() must be called separately."""
         return self
 
     async def __aexit__(self, exc_type, exc_value, traceback):
-        await self.exit_stack.__aexit__(exc_type, exc_value, traceback)
+        """Async context manager exit - ensures cleanup on exit."""
         await self.disconnect()
