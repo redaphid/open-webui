@@ -74,22 +74,32 @@
 
 			<div class="px-5 pb-5 w-full flex flex-col justify-center">
 				<div class=" text-xs text-gray-600 dark:text-gray-300 mb-2">
-					{$i18n.t('Open WebUI can use tools provided by any OpenAPI server.')} <br /><a
+					{$i18n.t('Open WebUI can use tools provided by OpenAPI and MCP servers.')} <br /><a
 						class="underline"
 						href="https://github.com/open-webui/openapi-servers"
-						target="_blank">{$i18n.t('Learn more about OpenAPI tool servers.')}</a
+						target="_blank">{$i18n.t('Learn more about tool servers.')}</a
 					>
 				</div>
 				<div class=" text-sm dark:text-gray-300 mb-1">
 					{#each $toolServers as toolServer}
 						<Collapsible buttonClassName="w-full" chevron>
 							<div>
-								<div class="text-sm font-medium dark:text-gray-100 text-gray-800">
-									{toolServer?.openapi?.info?.title} - v{toolServer?.openapi?.info?.version}
+								<div class="flex items-center gap-1.5">
+									<div class="text-sm font-medium dark:text-gray-100 text-gray-800">
+										{toolServer?.openapi?.info?.title ?? toolServer?.info?.name ?? toolServer?.url}
+										{#if toolServer?.openapi?.info?.version}
+											- v{toolServer.openapi.info.version}
+										{/if}
+									</div>
+									{#if toolServer?.type === 'mcp'}
+										<span class="text-[10px] font-medium px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-700 dark:text-purple-300">
+											MCP
+										</span>
+									{/if}
 								</div>
 
 								<div class="text-xs text-gray-500">
-									{toolServer?.openapi?.info?.description}
+									{toolServer?.openapi?.info?.description ?? toolServer?.info?.description ?? ''}
 								</div>
 
 								<div class="text-xs text-gray-500">

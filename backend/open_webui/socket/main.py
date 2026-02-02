@@ -685,12 +685,42 @@ async def yjs_awareness_update(sid, data):
         log.error(f"Error in yjs_awareness_update: {e}")
 
 
+@sio.on("daemon:stop")
+async def daemon_stop(sid, data):
+    """Handle client-initiated daemon stop."""
+    from open_webui.utils.daemon_executor import stop_daemon
+
+    user = SESSION_POOL.get(sid)
+    if not user:
+        return
+
+    daemon_id = data.get("daemon_id", "")
+    if daemon_id:
+        await stop_daemon(daemon_id)
+
+
 @sio.event
 async def disconnect(sid):
     if sid in SESSION_POOL:
         user = SESSION_POOL[sid]
         del SESSION_POOL[sid]
         await YDOC_MANAGER.remove_user_from_all_documents(sid)
+
+        # If user has no more active sessions, clean up their daemons
+        user_id = user.get("id")
+        if user_id:
+            remaining = [
+                s
+                for s, u in SESSION_POOL.items()
+                if isinstance(u, dict) and u.get("id") == user_id
+            ]
+            if not remaining:
+                from open_webui.utils.daemon_executor import cleanup_user_daemons
+
+                try:
+                    await cleanup_user_daemons(user_id)
+                except Exception as e:
+                    log.debug(f"Error cleaning up daemons for user {user_id}: {e}")
     else:
         pass
         # print(f"Unknown session ID {sid} disconnected")

@@ -39,7 +39,10 @@
 	import Markdown from '../chat/Messages/Markdown.svelte';
 	import Image from './Image.svelte';
 	import FullHeightIframe from './FullHeightIframe.svelte';
-	import { settings } from '$lib/stores';
+	import { settings, socket, daemonOutputs } from '$lib/stores';
+	import { createEventDispatcher } from 'svelte';
+
+	const dispatch = createEventDispatcher();
 
 	export let open = false;
 
@@ -58,6 +61,20 @@
 	export let hide = false;
 
 	export let onChange: Function = () => {};
+
+	let daemonOutput = '';
+	$: daemonOutput =
+		attributes?.daemon_id && $daemonOutputs[attributes.daemon_id]
+			? $daemonOutputs[attributes.daemon_id]
+			: '';
+
+	function handleDaemonStop() {
+		const daemonId = attributes?.daemon_id;
+		if (daemonId && $socket) {
+			$socket.emit('daemon:stop', { daemon_id: daemonId });
+			dispatch('daemonStop', { daemon_id: daemonId });
+		}
+	}
 
 	$: onChange(open);
 
@@ -260,7 +277,23 @@
 								{$i18n.t('Thinking...')}
 							{/if}
 						{:else if attributes?.type === 'code_interpreter'}
-							{#if attributes?.done === 'true'}
+							{#if attributes?.background === 'true'}
+								{#if attributes?.done === 'true'}
+									{$i18n.t('Background Script Finished')}
+								{:else}
+									<span class="inline-flex items-center gap-1.5">
+										<span class="relative flex h-2 w-2">
+											<span
+												class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"
+											/>
+											<span
+												class="relative inline-flex rounded-full h-2 w-2 bg-green-500"
+											/>
+										</span>
+										{$i18n.t('Background Script Running')}
+									</span>
+								{/if}
+							{:else if attributes?.done === 'true'}
 								{$i18n.t('Analyzed')}
 							{:else}
 								{$i18n.t('Analyzing...')}
@@ -269,6 +302,15 @@
 							{title}
 						{/if}
 					</div>
+
+					{#if attributes?.type === 'code_interpreter' && attributes?.background === 'true' && attributes?.done !== 'true'}
+						<button
+							class="ml-2 px-2 py-0.5 text-xs font-medium text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 rounded hover:bg-red-100 dark:hover:bg-red-900/40 transition"
+							on:pointerup|stopPropagation={handleDaemonStop}
+						>
+							{$i18n.t('Stop')}
+						</button>
+					{/if}
 
 					<div class="flex self-center translate-y-[1px]">
 						{#if open}
@@ -279,6 +321,14 @@
 					</div>
 				</div>
 			</div>
+
+			{#if attributes?.type === 'code_interpreter' && attributes?.background === 'true' && daemonOutput}
+				<div class="mt-1 mb-2 ml-1">
+					<pre
+						class="text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded p-2 max-h-48 overflow-y-auto whitespace-pre-wrap font-mono"
+					>{daemonOutput}</pre>
+				</div>
+			{/if}
 		{:else}
 			<!-- svelte-ignore a11y-no-static-element-interactions -->
 			<!-- svelte-ignore a11y-click-events-have-key-events -->

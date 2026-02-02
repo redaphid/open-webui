@@ -147,6 +147,7 @@ from open_webui.config import (
     CODE_INTERPRETER_JUPYTER_AUTH_TOKEN,
     CODE_INTERPRETER_JUPYTER_AUTH_PASSWORD,
     CODE_INTERPRETER_JUPYTER_TIMEOUT,
+    CODE_INTERPRETER_DAEMON_MAX_RUNTIME,
     ENABLE_MEMORIES,
     # Image
     AUTOMATIC1111_API_AUTH,
@@ -1112,6 +1113,9 @@ app.state.config.CODE_INTERPRETER_JUPYTER_AUTH_PASSWORD = (
     CODE_INTERPRETER_JUPYTER_AUTH_PASSWORD
 )
 app.state.config.CODE_INTERPRETER_JUPYTER_TIMEOUT = CODE_INTERPRETER_JUPYTER_TIMEOUT
+app.state.config.CODE_INTERPRETER_DAEMON_MAX_RUNTIME = (
+    CODE_INTERPRETER_DAEMON_MAX_RUNTIME
+)
 
 ########################################
 #
@@ -1448,6 +1452,58 @@ app.include_router(utils.router, prefix="/api/v1/utils", tags=["utils"])
 # SCIM 2.0 API for identity management
 if ENABLE_SCIM:
     app.include_router(scim.router, prefix="/api/v1/scim/v2", tags=["scim"])
+
+
+########################################
+#
+# DAEMON (background script) ENDPOINTS
+#
+########################################
+
+from open_webui.utils.daemon_executor import (
+    list_daemons as _list_daemons,
+    stop_daemon as _stop_daemon,
+    cleanup_user_daemons as _cleanup_user_daemons,
+)
+
+
+@app.get("/api/v1/daemons", tags=["daemons"])
+async def list_daemons(
+    chat_id: str = None,
+    user=Depends(get_verified_user),
+):
+    """List active background daemons for the current user."""
+    return _list_daemons(user_id=user.id, chat_id=chat_id)
+
+
+@app.post("/api/v1/daemons/{daemon_id}/stop", tags=["daemons"])
+async def stop_daemon_endpoint(
+    daemon_id: str,
+    user=Depends(get_verified_user),
+):
+    """Stop a specific background daemon."""
+    daemons = _list_daemons(user_id=user.id)
+    owned = any(d["daemon_id"] == daemon_id for d in daemons)
+    if not owned and user.role != "admin":
+        raise HTTPException(status_code=403, detail="Not authorized to stop this daemon")
+    stopped = await _stop_daemon(daemon_id)
+    if not stopped:
+        raise HTTPException(status_code=404, detail="Daemon not found")
+    return {"status": "stopped", "daemon_id": daemon_id}
+
+
+@app.post("/api/v1/daemons/chat/{chat_id}/stop", tags=["daemons"])
+async def stop_chat_daemons(
+    chat_id: str,
+    user=Depends(get_verified_user),
+):
+    """Stop all background daemons in a specific chat."""
+    daemons = _list_daemons(user_id=user.id, chat_id=chat_id)
+    stopped = 0
+    for d in daemons:
+        if await _stop_daemon(d["daemon_id"]):
+            stopped += 1
+    return {"status": "stopped", "count": stopped}
 
 
 try:

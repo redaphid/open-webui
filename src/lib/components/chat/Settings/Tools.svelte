@@ -108,7 +108,7 @@
 							class={`text-xs 
 								${($settings?.highContrastMode ?? false) ? 'text-gray-800 dark:text-gray-100' : 'text-gray-500'}`}
 						>
-							{$i18n.t('Connect to your own OpenAPI compatible external tool servers.')}
+							{$i18n.t('Connect to OpenAPI or MCP tool servers.')}
 							<br />
 							{$i18n.t(
 								'CORS must be properly configured by the provider to allow requests from Open WebUI.'
@@ -120,7 +120,7 @@
 						<a
 							class="underline"
 							href="https://github.com/open-webui/openapi-servers"
-							target="_blank">{$i18n.t('Learn more about OpenAPI tool servers.')}</a
+							target="_blank">{$i18n.t('Learn more about tool servers.')}</a
 						>
 					</div>
 				</div>

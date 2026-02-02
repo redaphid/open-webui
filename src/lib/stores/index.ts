@@ -29,6 +29,9 @@ export const socket: Writable<null | Socket> = writable(null);
 export const activeUserIds: Writable<null | string[]> = writable(null);
 export const USAGE_POOL: Writable<null | string[]> = writable(null);
 
+// Daemon (background script) output streams: keyed by daemon_id
+export const daemonOutputs: Writable<Record<string, string>> = writable({});
+
 export const theme = writable('system');
 
 export const shortCodesToEmojis = writable(

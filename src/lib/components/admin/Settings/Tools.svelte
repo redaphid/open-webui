@@ -100,7 +100,7 @@
 
 						<div class="my-1.5">
 							<div class="text-xs text-gray-500">
-								{$i18n.t('Connect to your own OpenAPI compatible external tool servers.')}
+								{$i18n.t('Connect to OpenAPI or MCP (Model Context Protocol) tool servers.')}
 							</div>
 						</div>
 					</div>

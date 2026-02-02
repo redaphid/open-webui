@@ -105,6 +105,7 @@ from open_webui.utils.filter import (
 )
 from open_webui.utils.code_interpreter import execute_code_jupyter
 from open_webui.utils.code_mode import generate_mcp_bindings, generate_code_mode_prompt
+from open_webui.utils import daemon_executor
 from open_webui.utils.payload import apply_system_prompt_to_body
 from open_webui.utils.mcp.client import MCPClient
 from open_webui.routers.code_mode import (
@@ -1595,12 +1596,23 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                 )
 
         if "code_interpreter" in features and features["code_interpreter"]:
+            code_interpreter_prompt = (
+                request.app.state.config.CODE_INTERPRETER_PROMPT_TEMPLATE
+                if request.app.state.config.CODE_INTERPRETER_PROMPT_TEMPLATE != ""
+                else DEFAULT_CODE_INTERPRETER_PROMPT
+            )
+
+            if request.app.state.config.CODE_INTERPRETER_ENGINE == "jupyter":
+                code_interpreter_prompt += """
+
+2. **Background Execution**: `<code_interpreter type="code" lang="python" background="true"></code_interpreter>`
+   - For long-running scripts (animations, monitoring, periodic tasks, continuous loops), use `background="true"` in the code_interpreter tag.
+   - Output streams to the chat in real time and the user can stop the script anytime.
+   - Only use `background="true"` for scripts with intentional long-running behavior (loops with sleep, continuous monitoring, hardware control loops). Regular scripts should NOT use it.
+   - Background scripts run in a persistent Jupyter kernel and do not block the chat response."""
+
             form_data["messages"] = add_or_update_user_message(
-                (
-                    request.app.state.config.CODE_INTERPRETER_PROMPT_TEMPLATE
-                    if request.app.state.config.CODE_INTERPRETER_PROMPT_TEMPLATE != ""
-                    else DEFAULT_CODE_INTERPRETER_PROMPT
-                ),
+                code_interpreter_prompt,
                 form_data["messages"],
             )
 
@@ -1681,23 +1693,18 @@ async def process_chat_payload(request, form_data, user, metadata, model):
 
                     auth_type = mcp_server_connection.get("auth_type", "")
                     headers = {}
+                    token = None
                     if auth_type == "bearer":
-                        headers["Authorization"] = (
-                            f"Bearer {mcp_server_connection.get('key', '')}"
-                        )
+                        token = mcp_server_connection.get("key", "")
                     elif auth_type == "none":
                         # No authentication
                         pass
                     elif auth_type == "session":
-                        headers["Authorization"] = (
-                            f"Bearer {request.state.token.credentials}"
-                        )
+                        token = request.state.token.credentials
                     elif auth_type == "system_oauth":
                         oauth_token = extra_params.get("__oauth_token__", None)
                         if oauth_token:
-                            headers["Authorization"] = (
-                                f"Bearer {oauth_token.get('access_token', '')}"
-                            )
+                            token = oauth_token.get("access_token", "")
                     elif auth_type == "oauth_2.1":
                         try:
                             splits = server_id.split(":")
@@ -1708,12 +1715,12 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                             )
 
                             if oauth_token:
-                                headers["Authorization"] = (
-                                    f"Bearer {oauth_token.get('access_token', '')}"
-                                )
+                                token = oauth_token.get("access_token", "")
                         except Exception as e:
                             log.error(f"Error getting OAuth token: {e}")
-                            oauth_token = None
+
+                    if token:
+                        headers["Authorization"] = f"Bearer {token}"
 
                     connection_headers = mcp_server_connection.get("headers", None)
                     if connection_headers and isinstance(connection_headers, dict):
@@ -1767,14 +1774,16 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                             "direct": False,
                         }
                 except Exception as e:
-                    log.debug(e)
+                    log.exception(
+                        f"Failed to connect to MCP server '{server_id}': {e}"
+                    )
                     if event_emitter:
                         await event_emitter(
                             {
                                 "type": "chat:message:error",
                                 "data": {
                                     "error": {
-                                        "content": f"Failed to connect to MCP server '{server_id}'"
+                                        "content": f"Failed to connect to MCP server '{server_id}': {e}"
                                     }
                                 },
                             }
@@ -2481,18 +2490,31 @@ async def process_chat_response(
                         if content and not content.endswith("\n"):
                             content += "\n"
 
+                        is_background = attributes.get("background") == "true"
+                        daemon_id = block.get("daemon_id", "")
+
                         if output:
                             output = html.escape(json.dumps(output))
 
                             if raw:
-                                content = f'{content}<code_interpreter type="code" lang="{lang}">\n{block["content"]}\n</code_interpreter>\n```output\n{output}\n```\n'
+                                bg_attr = ' background="true"' if is_background else ""
+                                content = f'{content}<code_interpreter type="code" lang="{lang}"{bg_attr}>\n{block["content"]}\n</code_interpreter>\n```output\n{output}\n```\n'
                             else:
-                                content = f'{content}<details type="code_interpreter" done="true" output="{output}">\n<summary>Analyzed</summary>\n```{lang}\n{block["content"]}\n```\n</details>\n'
+                                bg_attrs = ""
+                                if is_background:
+                                    bg_attrs = f' background="true" daemon_id="{daemon_id}"'
+                                content = f'{content}<details type="code_interpreter" done="true" output="{output}"{bg_attrs}>\n<summary>{"Background Script Finished" if is_background else "Analyzed"}</summary>\n```{lang}\n{block["content"]}\n```\n</details>\n'
                         else:
                             if raw:
-                                content = f'{content}<code_interpreter type="code" lang="{lang}">\n{block["content"]}\n</code_interpreter>\n'
+                                bg_attr = ' background="true"' if is_background else ""
+                                content = f'{content}<code_interpreter type="code" lang="{lang}"{bg_attr}>\n{block["content"]}\n</code_interpreter>\n'
                             else:
-                                content = f'{content}<details type="code_interpreter" done="false">\n<summary>Analyzing...</summary>\n```{lang}\n{block["content"]}\n```\n</details>\n'
+                                bg_attrs = ""
+                                if is_background:
+                                    bg_attrs = f' background="true" daemon_id="{daemon_id}"'
+                                summary = "Background Script Running" if is_background else "Analyzing..."
+                                done = "daemon" if is_background and daemon_id else "false"
+                                content = f'{content}<details type="code_interpreter" done="{done}"{bg_attrs}>\n<summary>{summary}</summary>\n```{lang}\n{block["content"]}\n```\n</details>\n'
 
                     else:
                         block_content = str(block["content"]).strip()
@@ -3558,7 +3580,74 @@ async def process_chat_response(
                                         code = mcp_bindings + code
                                         log.debug(f"Injected MCP bindings for code mode session: {code_mode_session_id}")
 
-                                if (
+                                is_background = content_blocks[-1]["attributes"].get("background") == "true"
+
+                                if is_background:
+                                    # Background daemon execution - only supported on Jupyter
+                                    if (
+                                        request.app.state.config.CODE_INTERPRETER_ENGINE
+                                        == "jupyter"
+                                    ):
+                                        try:
+                                            daemon_id = await daemon_executor.start_daemon(
+                                                base_url=request.app.state.config.CODE_INTERPRETER_JUPYTER_URL,
+                                                code=code,
+                                                token=(
+                                                    request.app.state.config.CODE_INTERPRETER_JUPYTER_AUTH_TOKEN
+                                                    if request.app.state.config.CODE_INTERPRETER_JUPYTER_AUTH
+                                                    == "token"
+                                                    else None
+                                                ),
+                                                password=(
+                                                    request.app.state.config.CODE_INTERPRETER_JUPYTER_AUTH_PASSWORD
+                                                    if request.app.state.config.CODE_INTERPRETER_JUPYTER_AUTH
+                                                    == "password"
+                                                    else None
+                                                ),
+                                                user_id=user.id,
+                                                chat_id=metadata.get("chat_id", ""),
+                                                message_id=metadata.get("message_id", ""),
+                                                event_emitter=event_emitter,
+                                                code_mode_session_id=locals().get("code_mode_session_id"),
+                                                max_runtime=int(
+                                                    request.app.state.config.CODE_INTERPRETER_DAEMON_MAX_RUNTIME
+                                                ),
+                                            )
+                                            output = {
+                                                "stdout": f"Background script started. Daemon ID: {daemon_id}",
+                                            }
+                                            content_blocks[-1]["daemon_id"] = daemon_id
+                                            content_blocks[-1]["output"] = output
+
+                                            content_blocks.append(
+                                                {
+                                                    "type": "text",
+                                                    "content": "",
+                                                }
+                                            )
+
+                                            await event_emitter(
+                                                {
+                                                    "type": "chat:completion",
+                                                    "data": {
+                                                        "content": serialize_content_blocks(content_blocks),
+                                                    },
+                                                }
+                                            )
+
+                                            # Daemon is running in the background, no need
+                                            # to continue the code execution retry loop.
+                                            retries = MAX_RETRIES
+                                            break
+                                        except Exception as daemon_err:
+                                            output = {
+                                                "stderr": f"Failed to start background script: {daemon_err}",
+                                            }
+                                    else:
+                                        output = {
+                                            "stderr": "Background execution requires the Jupyter engine. Pyodide does not support background scripts.",
+                                        }
+                                elif (
                                     request.app.state.config.CODE_INTERPRETER_ENGINE
                                     == "pyodide"
                                 ):

@@ -59,6 +59,8 @@
 	let enable = true;
 	let loading = false;
 
+	let verifyResult = null;
+
 	const registerOAuthClientHandler = async () => {
 		if (url === '') {
 			toast.error($i18n.t('Please enter a valid URL'));
@@ -96,6 +98,8 @@
 	};
 
 	const verifyHandler = async () => {
+		verifyResult = null;
+
 		if (url === '') {
 			toast.error($i18n.t('Please enter a valid URL'));
 			return;
@@ -136,6 +140,7 @@
 			});
 
 			if (res) {
+				verifyResult = res;
 				toast.success($i18n.t('Connection successful'));
 				console.debug('Connection successful', res);
 			}
@@ -161,6 +166,7 @@
 			});
 
 			if (res) {
+				verifyResult = res;
 				toast.success($i18n.t('Connection successful'));
 				console.debug('Connection successful', res);
 			}
@@ -336,6 +342,7 @@
 		description = '';
 
 		oauthClientInfo = null;
+		verifyResult = null;
 
 		enable = true;
 		functionNameFilterList = '';
@@ -366,6 +373,10 @@
 			accessControl = connection.config?.access_control ?? null;
 		}
 	};
+
+	$: if (url || type || auth_type) {
+		verifyResult = null;
+	}
 
 	$: if (show) {
 		init();
@@ -436,27 +447,43 @@
 				>
 					<div class="px-1">
 						{#if !direct}
-							<div class="flex gap-2 mb-1.5">
-								<div class="flex w-full justify-between items-center">
-									<div class=" text-xs text-gray-500">{$i18n.t('Type')}</div>
-
-									<div class="">
-										<button
-											on:click={() => {
-												type = ['', 'openapi'].includes(type) ? 'mcp' : 'openapi';
-											}}
-											type="button"
-											class=" text-xs text-gray-700 dark:text-gray-300"
-										>
-											{#if ['', 'openapi'].includes(type)}
-												{$i18n.t('OpenAPI')}
-											{:else if type === 'mcp'}
-												{$i18n.t('MCP')}
-												<span class="text-gray-500">{$i18n.t('Streamable HTTP')}</span>
-											{/if}
-										</button>
+							<div class="grid grid-cols-2 gap-2 mb-2">
+								<button
+									type="button"
+									class="p-2.5 rounded-xl border text-left transition {['', 'openapi'].includes(type)
+										? 'border-gray-800 dark:border-white bg-gray-50 dark:bg-gray-800'
+										: 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'}"
+									on:click={() => {
+										type = 'openapi';
+									}}
+								>
+									<div class="text-sm font-medium">{$i18n.t('OpenAPI')}</div>
+									<div
+										class="text-xs {($settings?.highContrastMode ?? false)
+											? 'text-gray-700 dark:text-gray-200'
+											: 'text-gray-500'}"
+									>
+										{$i18n.t('REST API with spec')}
 									</div>
-								</div>
+								</button>
+								<button
+									type="button"
+									class="p-2.5 rounded-xl border text-left transition {type === 'mcp'
+										? 'border-gray-800 dark:border-white bg-gray-50 dark:bg-gray-800'
+										: 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'}"
+									on:click={() => {
+										type = 'mcp';
+									}}
+								>
+									<div class="text-sm font-medium">{$i18n.t('MCP')}</div>
+									<div
+										class="text-xs {($settings?.highContrastMode ?? false)
+											? 'text-gray-700 dark:text-gray-200'
+											: 'text-gray-500'}"
+									>
+										{$i18n.t('Streamable HTTP')}
+									</div>
+								</button>
 							</div>
 						{/if}
 
@@ -515,6 +542,23 @@
 								</div>
 							</div>
 						</div>
+
+						{#if verifyResult}
+							<div class="mt-2 p-2.5 rounded-xl bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700">
+								<div class="text-xs font-medium text-green-600 dark:text-green-400 mb-1">{$i18n.t('Connection verified')}</div>
+								{#if verifyResult.specs}
+									<div class="text-xs text-gray-500 dark:text-gray-400 mb-0.5">{$i18n.t('{{COUNT}} tools available', { COUNT: verifyResult.specs.length })}</div>
+									{#each verifyResult.specs.slice(0, 5) as spec}
+										<div class="text-xs text-gray-600 dark:text-gray-300">&bull; {spec.name}</div>
+									{/each}
+									{#if verifyResult.specs.length > 5}
+										<div class="text-xs text-gray-400 dark:text-gray-500">{$i18n.t('... and {{COUNT}} more', { COUNT: verifyResult.specs.length - 5 })}</div>
+									{/if}
+								{:else if verifyResult.openapi}
+									<div class="text-xs text-gray-600 dark:text-gray-300">{verifyResult.openapi.info?.title ?? ''} {verifyResult.openapi.info?.version ? 'v' + verifyResult.openapi.info.version : ''}</div>
+								{/if}
+							</div>
+						{/if}
 
 						{#if ['', 'openapi'].includes(type)}
 							<div class="flex gap-2 mt-2">
@@ -604,34 +648,16 @@
 									</div>
 
 									{#if auth_type === 'oauth_2.1'}
-										<div class="flex items-center gap-2">
-											<div class="flex flex-col justify-end items-center shrink-0">
-												<Tooltip
-													content={oauthClientInfo
-														? $i18n.t('Register Again')
-														: $i18n.t('Register Client')}
-												>
-													<button
-														class=" text-xs underline dark:text-gray-500 dark:hover:text-gray-200 text-gray-700 hover:text-gray-900 transition"
-														type="button"
-														on:click={() => {
-															registerOAuthClientHandler();
-														}}
-													>
-														{$i18n.t('Register Client')}
-													</button>
-												</Tooltip>
-											</div>
-
+										<div class="flex items-center">
 											{#if !oauthClientInfo}
 												<div
-													class="text-xs font-medium px-1.5 rounded-md bg-yellow-500/20 text-yellow-700 dark:text-yellow-200"
+													class="text-xs font-medium px-1.5 py-0.5 rounded-md bg-yellow-500/20 text-yellow-700 dark:text-yellow-200"
 												>
 													{$i18n.t('Not Registered')}
 												</div>
 											{:else}
 												<div
-													class="text-xs font-medium px-1.5 rounded-md bg-green-500/20 text-green-700 dark:text-green-200"
+													class="text-xs font-medium px-1.5 py-0.5 rounded-md bg-green-500/20 text-green-700 dark:text-green-200"
 												>
 													{$i18n.t('Registered')}
 												</div>
@@ -697,6 +723,31 @@
 								</div>
 							</div>
 						</div>
+
+						{#if auth_type === 'oauth_2.1' && !direct}
+							<div class="mt-2 p-3 rounded-xl border border-gray-200 dark:border-gray-700">
+								<div class="flex items-center justify-between mb-2">
+									<div class="text-xs font-medium">{$i18n.t('OAuth 2.1 Client Registration')}</div>
+								</div>
+								<div class="text-xs text-gray-500 dark:text-gray-400 mb-2.5">
+									{$i18n.t('Register your app with the OAuth provider to allow users to authorize. Ensure the server URL and ID are set before registering.')}
+								</div>
+								<button
+									class="px-3 py-1.5 text-xs font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full"
+									type="button"
+									on:click={() => {
+										registerOAuthClientHandler();
+									}}
+								>
+									{oauthClientInfo ? $i18n.t('Re-register Client') : $i18n.t('Register Client')}
+								</button>
+								{#if oauthClientInfo}
+									<div class="text-xs text-green-600 dark:text-green-400 mt-2">
+										{$i18n.t('Client registered successfully. Save the connection to persist.')}
+									</div>
+								{/if}
+							</div>
+						{/if}
 
 						{#if !direct}
 							<div class="flex gap-2 mt-2">

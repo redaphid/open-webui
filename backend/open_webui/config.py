@@ -2165,6 +2165,12 @@ CODE_INTERPRETER_BLOCKED_MODULES = [
     if library.strip()
 ]
 
+CODE_INTERPRETER_DAEMON_MAX_RUNTIME = PersistentConfig(
+    "CODE_INTERPRETER_DAEMON_MAX_RUNTIME",
+    "code_interpreter.daemon.max_runtime",
+    int(os.environ.get("CODE_INTERPRETER_DAEMON_MAX_RUNTIME", "3600")),
+)
+
 DEFAULT_CODE_INTERPRETER_PROMPT = """
 #### Tools Available
 

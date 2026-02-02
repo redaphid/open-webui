@@ -21,6 +21,7 @@
 	import Terminal from '$lib/components/icons/Terminal.svelte';
 	import ChevronRight from '$lib/components/icons/ChevronRight.svelte';
 	import ChevronLeft from '$lib/components/icons/ChevronLeft.svelte';
+	import LockClosed from '$lib/components/icons/LockClosed.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -355,8 +356,11 @@
 							}}
 						>
 							{#if !(tools[toolId]?.authenticated ?? true)}
-								<!-- make it slighly darker and not clickable -->
-								<div class="absolute inset-0 opacity-50 rounded-xl cursor-pointer z-10" />
+								<Tooltip content={$i18n.t('Click to authorize with OAuth')} placement="top">
+									<div class="absolute inset-0 bg-gray-100/50 dark:bg-gray-800/50 rounded-xl cursor-pointer z-10 flex items-center justify-end pr-3">
+										<LockClosed className="size-3.5 text-gray-500" />
+									</div>
+								</Tooltip>
 							{/if}
 							<div class="flex-1 truncate">
 								<div class="flex flex-1 gap-2 items-center">

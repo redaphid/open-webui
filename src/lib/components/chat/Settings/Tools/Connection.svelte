@@ -53,15 +53,37 @@
 					<WrenchAlt />
 				</Tooltip>
 
+				<span
+					class="text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0 {connection?.type === 'mcp'
+						? 'bg-purple-500/20 text-purple-700 dark:text-purple-300'
+						: 'bg-blue-500/20 text-blue-700 dark:text-blue-300'}"
+				>
+					{connection?.type === 'mcp' ? 'MCP' : 'OpenAPI'}
+				</span>
+
 				{#if connection?.info?.name}
-					<div class=" capitalize outline-hidden w-full bg-transparent">
+					<div class="capitalize outline-hidden w-full bg-transparent truncate">
 						{connection?.info?.name ?? connection?.url}
 						<span class="text-gray-500">{connection?.info?.id ?? ''}</span>
 					</div>
 				{:else}
-					<div>
+					<div class="truncate">
 						{connection?.url}
 					</div>
+				{/if}
+
+				{#if connection?.auth_type && connection.auth_type !== 'none'}
+					<span class="text-[10px] text-gray-400 dark:text-gray-500 shrink-0">
+						{connection.auth_type === 'bearer'
+							? $i18n.t('Bearer')
+							: connection.auth_type === 'session'
+								? $i18n.t('Session')
+								: connection.auth_type === 'system_oauth'
+									? $i18n.t('OAuth')
+									: connection.auth_type === 'oauth_2.1'
+										? $i18n.t('OAuth 2.1')
+										: connection.auth_type}
+					</span>
 				{/if}
 			</div>
 		</div>

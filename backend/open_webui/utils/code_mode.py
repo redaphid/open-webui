@@ -69,20 +69,7 @@ def generate_function_signature(tool_spec: dict) -> tuple[str, str]:
         if param_name in required:
             params.append(f"{param_name}: {param_type}")
         else:
-            # Get default value based on type
-            default = "None"
-            if param_type == "str":
-                default = '""'
-            elif param_type in ("int", "float"):
-                default = "0"
-            elif param_type == "bool":
-                default = "False"
-            elif param_type.startswith("list"):
-                default = "None"
-            elif param_type == "dict":
-                default = "None"
-
-            params.append(f"{param_name}: {param_type} = {default}")
+            params.append(f"{param_name}: {param_type} = None")
 
         if param_desc:
             param_docs.append(f"            {param_name}: {param_desc}")
@@ -263,7 +250,9 @@ def generate_mcp_bindings(
     @staticmethod
     def {method_name}({signature_params}):
 {docstring}
-        return _call_mcp_tool("{full_name}", **{{{kwargs_str}}})
+        _kwargs = {{{kwargs_str}}}
+        _kwargs = {{k: v for k, v in _kwargs.items() if v is not None}}
+        return _call_mcp_tool("{full_name}", **_kwargs)
 '''
 
     binding_code += '''

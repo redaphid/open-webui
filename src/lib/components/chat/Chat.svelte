@@ -42,7 +42,8 @@
 		functions,
 		selectedFolder,
 		pinnedChats,
-		showEmbeds
+		showEmbeds,
+		daemonOutputs
 	} from '$lib/stores';
 
 	import {
@@ -495,6 +496,33 @@
 					eventConfirmationMessage = data.message;
 					eventConfirmationInputPlaceholder = data.placeholder;
 					eventConfirmationInputValue = data?.value ?? '';
+				} else if (type === 'daemon:output') {
+					const daemonId = data?.daemon_id;
+					if (daemonId) {
+						daemonOutputs.update((outputs) => ({
+							...outputs,
+							[daemonId]: (outputs[daemonId] || '') + (data?.content || '')
+						}));
+					}
+
+					if (autoScroll) {
+						scrollToBottom('smooth');
+					}
+				} else if (type === 'daemon:status') {
+					const daemonId = data?.daemon_id;
+					const daemonStatus = data?.status;
+
+					if (daemonId && message) {
+						// Update the message content to reflect daemon status change
+						if (
+							daemonStatus === 'stopped' ||
+							daemonStatus === 'completed' ||
+							daemonStatus === 'error'
+						) {
+							// Re-render will pick up the updated done state from server
+							message.done = true;
+						}
+					}
 				} else {
 					console.log('Unknown message type', data);
 				}
