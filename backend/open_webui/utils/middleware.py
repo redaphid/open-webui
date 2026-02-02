@@ -104,8 +104,13 @@ from open_webui.utils.filter import (
     process_filter_functions,
 )
 from open_webui.utils.code_interpreter import execute_code_jupyter
+from open_webui.utils.code_mode import generate_mcp_bindings, generate_code_mode_prompt
 from open_webui.utils.payload import apply_system_prompt_to_body
 from open_webui.utils.mcp.client import MCPClient
+from open_webui.routers.code_mode import (
+    register_code_mode_session,
+    unregister_code_mode_session,
+)
 
 
 from open_webui.config import (
@@ -1804,6 +1809,21 @@ async def process_chat_payload(request, form_data, user, metadata, model):
 
     if mcp_clients:
         metadata["mcp_clients"] = mcp_clients
+
+    # Store MCP tools in metadata for code mode
+    if mcp_tools_dict:
+        metadata["mcp_tools"] = mcp_tools_dict
+
+        # Add code mode prompt if code interpreter is enabled with MCP tools
+        features = metadata.get("features", {})
+        if features.get("code_interpreter", False):
+            code_mode_prompt = generate_code_mode_prompt(mcp_tools_dict)
+            if code_mode_prompt:
+                form_data["messages"] = add_or_update_user_message(
+                    code_mode_prompt,
+                    form_data["messages"],
+                )
+                log.debug("Added code mode prompt for MCP tools")
 
     # Inject builtin tools for native function calling based on enabled features and model capability
     # Check if builtin_tools capability is enabled for this model (defaults to True if not specified)
@@ -3510,6 +3530,33 @@ async def process_chat_response(
                                     """
                                     )
                                     code = blocking_code + "\n" + code
+
+                                # Code Mode: Inject MCP tool bindings if available
+                                mcp_tools = metadata.get("mcp_tools", {})
+                                if mcp_tools and request.app.state.config.CODE_INTERPRETER_ENGINE == "jupyter":
+                                    # Generate a unique session ID for this code execution
+                                    code_mode_session_id = str(uuid4())
+
+                                    # Register the session with MCP tools for proxy access
+                                    register_code_mode_session(
+                                        session_id=code_mode_session_id,
+                                        user_id=user.id,
+                                        mcp_clients=metadata.get("mcp_clients", {}),
+                                        mcp_tools=mcp_tools,
+                                    )
+
+                                    # Generate Python bindings for MCP tools
+                                    # The proxy URL is the internal API endpoint
+                                    proxy_url = f"{request.base_url}api/v1/code-mode/call"
+                                    mcp_bindings = generate_mcp_bindings(
+                                        mcp_tools=mcp_tools,
+                                        proxy_url=proxy_url,
+                                        session_id=code_mode_session_id,
+                                    )
+
+                                    if mcp_bindings:
+                                        code = mcp_bindings + code
+                                        log.debug(f"Injected MCP bindings for code mode session: {code_mode_session_id}")
 
                                 if (
                                     request.app.state.config.CODE_INTERPRETER_ENGINE
