@@ -3588,7 +3588,23 @@ async def process_chat_response(
                                         request.app.state.config.CODE_INTERPRETER_ENGINE
                                         == "jupyter"
                                     ):
+                                        _daemon_started = False
                                         try:
+                                            # Stop any existing daemons in this chat
+                                            # so the new daemon replaces the old one
+                                            chat_id = metadata.get("chat_id", "")
+                                            existing = daemon_executor.list_daemons(
+                                                chat_id=chat_id
+                                            )
+                                            for old in existing:
+                                                if old["status"] == "running":
+                                                    log.info(
+                                                        f"Stopping previous daemon {old['daemon_id']} in chat {chat_id}"
+                                                    )
+                                                    await daemon_executor.stop_daemon(
+                                                        old["daemon_id"]
+                                                    )
+
                                             daemon_id = await daemon_executor.start_daemon(
                                                 base_url=request.app.state.config.CODE_INTERPRETER_JUPYTER_URL,
                                                 code=code,
@@ -3613,6 +3629,8 @@ async def process_chat_response(
                                                     request.app.state.config.CODE_INTERPRETER_DAEMON_MAX_RUNTIME
                                                 ),
                                             )
+                                            _daemon_started = True
+
                                             output = {
                                                 "stdout": f"Background script started. Daemon ID: {daemon_id}",
                                             }
@@ -3634,15 +3652,21 @@ async def process_chat_response(
                                                     },
                                                 }
                                             )
+                                        except Exception as daemon_err:
+                                            if not _daemon_started:
+                                                output = {
+                                                    "stderr": f"Failed to start background script: {daemon_err}",
+                                                }
+                                            else:
+                                                log.warning(
+                                                    f"Daemon started but post-processing failed: {daemon_err}"
+                                                )
 
-                                            # Daemon is running in the background, no need
-                                            # to continue the code execution retry loop.
+                                        # If daemon started, always exit the retry loop
+                                        # even if event_emitter or other post-processing failed.
+                                        if _daemon_started:
                                             retries = MAX_RETRIES
                                             break
-                                        except Exception as daemon_err:
-                                            output = {
-                                                "stderr": f"Failed to start background script: {daemon_err}",
-                                            }
                                     else:
                                         output = {
                                             "stderr": "Background execution requires the Jupyter engine. Pyodide does not support background scripts.",
