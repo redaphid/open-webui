@@ -13,6 +13,7 @@
 	import { getTools } from '$lib/apis/tools';
 	import { getBanners } from '$lib/apis/configs';
 	import { getUserSettings } from '$lib/apis/users';
+	import { getTemplates } from '$lib/apis/templates';
 
 	import { WEBUI_VERSION } from '$lib/constants';
 	import { compareVersion } from '$lib/utils';
@@ -23,6 +24,7 @@
 		settings,
 		models,
 		prompts,
+		templates,
 		knowledge,
 		tools,
 		functions,
@@ -141,6 +143,11 @@
 		tools.set(toolsData);
 	};
 
+	const setTemplates = async () => {
+		const templatesData = await getTemplates(localStorage.token);
+		templates.set(templatesData);
+	};
+
 	onMount(async () => {
 		if ($user === undefined || $user === null) {
 			await goto('/auth');
@@ -155,6 +162,7 @@
 			checkLocalDBChats(),
 			setBanners(),
 			setTools(),
+			setTemplates(),
 			setUserSettings(async () => {
 				await Promise.all([setModels(), setToolServers()]);
 			})

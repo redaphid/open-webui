@@ -17,7 +17,8 @@
 		temporaryChatEnabled,
 		selectedFolder,
 		chats,
-		currentChatPage
+		currentChatPage,
+		templates as _templates
 	} from '$lib/stores';
 	import { sanitizeResponseContent, extractCurlyBraceWords } from '$lib/utils';
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
@@ -28,6 +29,8 @@
 	import MessageInput from './MessageInput.svelte';
 	import FolderPlaceholder from './Placeholder/FolderPlaceholder.svelte';
 	import FolderTitle from './Placeholder/FolderTitle.svelte';
+	import Wrench from '$lib/components/icons/Wrench.svelte';
+	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -59,9 +62,20 @@
 	export let onChange = (e) => {};
 
 	export let toolServers = [];
+	export let onApplyTemplate: Function = () => {};
 
 	let models = [];
 	let selectedModelIdx = 0;
+	let selectedTemplateId = '';
+	let showTemplateDropdown = false;
+
+	$: templates = $_templates ?? [];
+
+	const handleTemplateSelect = (template) => {
+		selectedTemplateId = template.id;
+		showTemplateDropdown = false;
+		onApplyTemplate(template);
+	};
 
 	$: if (selectedModels.length > 0) {
 		selectedModelIdx = models.length - 1;
@@ -81,6 +95,65 @@
 				<EyeSlash strokeWidth="2.5" className="size-4" />{$i18n.t('Temporary Chat')}
 			</div>
 		</Tooltip>
+	{/if}
+
+	{#if templates.length > 0}
+		<div class="flex justify-center mb-4">
+			<div class="relative">
+				<button
+					class="flex items-center gap-2 px-4 py-2 rounded-xl bg-gray-50 dark:bg-gray-850 hover:bg-gray-100 dark:hover:bg-gray-800 transition text-sm"
+					on:click={() => (showTemplateDropdown = !showTemplateDropdown)}
+				>
+					<Wrench className="size-4" />
+					<span>
+						{#if selectedTemplateId}
+							{templates.find((t) => t.id === selectedTemplateId)?.name ?? $i18n.t('Select Template')}
+						{:else}
+							{$i18n.t('Select Template')}
+						{/if}
+					</span>
+					<ChevronDown className="size-4" />
+				</button>
+
+				{#if showTemplateDropdown}
+					<div
+						class="absolute top-full left-0 mt-1 w-64 bg-white dark:bg-gray-850 rounded-xl shadow-lg border border-gray-100 dark:border-gray-800 z-50 overflow-hidden"
+					>
+						<button
+							class="w-full px-4 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-800 transition text-gray-500"
+							on:click={() => {
+								selectedTemplateId = '';
+								showTemplateDropdown = false;
+							}}
+						>
+							{$i18n.t('No template')}
+						</button>
+						{#each templates as template}
+							<button
+								class="w-full px-4 py-2 text-left hover:bg-gray-50 dark:hover:bg-gray-800 transition {selectedTemplateId ===
+								template.id
+									? 'bg-blue-50 dark:bg-blue-900/30'
+									: ''}"
+								on:click={() => handleTemplateSelect(template)}
+							>
+								<div class="font-medium text-sm">{template.name}</div>
+								{#if template.description}
+									<div class="text-xs text-gray-500 line-clamp-1">{template.description}</div>
+								{/if}
+							</button>
+						{/each}
+						<div class="border-t border-gray-100 dark:border-gray-800">
+							<a
+								href="/workspace/templates"
+								class="block w-full px-4 py-2 text-left text-xs text-blue-500 hover:bg-gray-50 dark:hover:bg-gray-800 transition"
+							>
+								{$i18n.t('Manage Templates')}
+							</a>
+						</div>
+					</div>
+				{/if}
+			</div>
+		</div>
 	{/if}
 
 	<div

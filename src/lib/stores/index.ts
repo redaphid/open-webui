@@ -63,6 +63,7 @@ export const selectedFolder = writable(null);
 export const models: Writable<Model[]> = writable([]);
 
 export const prompts: Writable<null | Prompt[]> = writable(null);
+export const templates: Writable<null | Template[]> = writable(null);
 export const knowledge: Writable<null | Document[]> = writable(null);
 export const tools = writable(null);
 export const functions = writable(null);
@@ -244,6 +245,18 @@ type Prompt = {
 	title: string;
 	content: string;
 	timestamp: number;
+};
+
+type Template = {
+	id: string;
+	user_id: string;
+	name: string;
+	description: string | null;
+	system_prompt: string | null;
+	tool_ids: string[] | null;
+	feature_ids: string[] | null;
+	created_at: number;
+	updated_at: number;
 };
 
 type Document = {

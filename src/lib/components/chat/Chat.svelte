@@ -311,6 +311,30 @@
 		}
 	};
 
+	const applyTemplate = (template) => {
+		if (!template) return;
+
+		// Apply tool IDs
+		if (template.tool_ids && template.tool_ids.length > 0) {
+			selectedToolIds = template.tool_ids;
+		}
+
+		// Apply feature flags
+		if (template.feature_ids) {
+			webSearchEnabled = template.feature_ids.includes('web_search');
+			imageGenerationEnabled = template.feature_ids.includes('image_generation');
+			codeInterpreterEnabled = template.feature_ids.includes('code_interpreter');
+		}
+
+		// Apply system prompt to params
+		if (template.system_prompt) {
+			params = {
+				...params,
+				system: template.system_prompt
+			};
+		}
+	};
+
 	const showMessage = async (message, ignoreSettings = false) => {
 		await tick();
 
@@ -2598,6 +2622,7 @@
 									{createMessagePair}
 									{onSelect}
 									{onUpload}
+									onApplyTemplate={applyTemplate}
 									onChange={(data) => {
 										if (!$temporaryChatEnabled) {
 											saveDraft(data);
