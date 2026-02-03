@@ -111,6 +111,7 @@ from open_webui.utils.mcp.client import MCPClient
 from open_webui.routers.code_mode import (
     register_code_mode_session,
     unregister_code_mode_session,
+    store_user_bindings,
 )
 
 
@@ -1823,16 +1824,22 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     if mcp_tools_dict:
         metadata["mcp_tools"] = mcp_tools_dict
 
-        # Add code mode prompt if code interpreter is enabled with MCP tools
+        # Add code mode prompt if Jupyter code interpreter is enabled with MCP tools
+        # (Pyodide runs in the browser sandbox and cannot reach the MCP proxy)
         features = metadata.get("features", {})
-        if features.get("code_interpreter", False):
+        log.info(
+            f"Code mode prompt check: mcp_tools={len(mcp_tools_dict)}, "
+            f"code_interpreter={features.get('code_interpreter', False)}, "
+            f"engine={request.app.state.config.CODE_INTERPRETER_ENGINE}"
+        )
+        if features.get("code_interpreter", False) and request.app.state.config.CODE_INTERPRETER_ENGINE == "jupyter":
             code_mode_prompt = generate_code_mode_prompt(mcp_tools_dict)
             if code_mode_prompt:
                 form_data["messages"] = add_or_update_user_message(
                     code_mode_prompt,
                     form_data["messages"],
                 )
-                log.debug("Added code mode prompt for MCP tools")
+                log.info("Added code mode prompt for MCP tools")
 
     # Inject builtin tools for native function calling based on enabled features and model capability
     # Check if builtin_tools capability is enabled for this model (defaults to True if not specified)
@@ -2478,11 +2485,18 @@ async def process_chat_response(
                             split_content_and_whitespace(content)
                         )
                         if is_opening_code_block(content_stripped):
-                            # Remove trailing backticks that would open a new block
-                            content = (
-                                content_stripped.rstrip("`").rstrip()
-                                + original_whitespace
-                            )
+                            # Remove trailing code fence opener (e.g. ```python, ```)
+                            last_fence = content_stripped.rfind("```")
+                            if last_fence >= 0:
+                                content = (
+                                    content_stripped[:last_fence].rstrip()
+                                    + original_whitespace
+                                )
+                            else:
+                                content = (
+                                    content_stripped.rstrip("`").rstrip()
+                                    + original_whitespace
+                                )
                         else:
                             # Keep content as is - either closing backticks or no backticks
                             content = content_stripped + original_whitespace
@@ -3555,6 +3569,7 @@ async def process_chat_response(
 
                                 # Code Mode: Inject MCP tool bindings if available
                                 mcp_tools = metadata.get("mcp_tools", {})
+                                print(f"[CODE_MODE] mcp_tools={len(mcp_tools)} keys, engine={request.app.state.config.CODE_INTERPRETER_ENGINE}", flush=True)
                                 if mcp_tools and request.app.state.config.CODE_INTERPRETER_ENGINE == "jupyter":
                                     # Generate a unique session ID for this code execution
                                     code_mode_session_id = str(uuid4())
@@ -3578,6 +3593,7 @@ async def process_chat_response(
 
                                     if mcp_bindings:
                                         code = mcp_bindings + code
+                                        store_user_bindings(user.id, mcp_bindings, code_mode_session_id)
                                         log.debug(f"Injected MCP bindings for code mode session: {code_mode_session_id}")
 
                                 is_background = content_blocks[-1]["attributes"].get("background") == "true"

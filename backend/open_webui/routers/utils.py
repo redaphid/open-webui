@@ -14,6 +14,7 @@ from open_webui.utils.misc import get_gravatar_url
 from open_webui.utils.pdf_generator import PDFGenerator
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.code_interpreter import execute_code_jupyter
+from open_webui.routers.code_mode import get_user_bindings
 
 
 log = logging.getLogger(__name__)
@@ -46,9 +47,15 @@ async def execute_code(
     request: Request, form_data: CodeForm, user=Depends(get_verified_user)
 ):
     if request.app.state.config.CODE_EXECUTION_ENGINE == "jupyter":
+        code = form_data.code
+        # Inject MCP bindings if the user has an active code mode session
+        bindings = get_user_bindings(user.id)
+        if bindings:
+            code = bindings + code
+
         output = await execute_code_jupyter(
             request.app.state.config.CODE_EXECUTION_JUPYTER_URL,
-            form_data.code,
+            code,
             (
                 request.app.state.config.CODE_EXECUTION_JUPYTER_AUTH_TOKEN
                 if request.app.state.config.CODE_EXECUTION_JUPYTER_AUTH == "token"

@@ -17,8 +17,12 @@ class MCPClient:
     def __init__(self):
         self.session: Optional[ClientSession] = None
         self.exit_stack: Optional[AsyncExitStack] = None
+        self._url: Optional[str] = None
+        self._headers: Optional[dict] = None
 
     async def connect(self, url: str, headers: Optional[dict] = None):
+        self._url = url
+        self._headers = headers
         async with AsyncExitStack() as exit_stack:
             try:
                 self._streams_context = streamablehttp_client(url, headers=headers)
@@ -42,7 +46,14 @@ class MCPClient:
                     await asyncio.shield(self.disconnect())
                 raise e
 
+    async def _ensure_connected(self):
+        """Reconnect if the session has been lost."""
+        if not self.session and self._url:
+            log.debug(f"MCP client reconnecting to {self._url}")
+            await self.connect(self._url, self._headers)
+
     async def list_tool_specs(self) -> Optional[dict]:
+        await self._ensure_connected()
         if not self.session:
             raise RuntimeError("MCP client is not connected.")
 
@@ -68,6 +79,7 @@ class MCPClient:
     async def call_tool(
         self, function_name: str, function_args: dict
     ) -> Optional[dict]:
+        await self._ensure_connected()
         if not self.session:
             raise RuntimeError("MCP client is not connected.")
 
@@ -94,6 +106,7 @@ class MCPClient:
             return result_content
 
     async def list_resources(self, cursor: Optional[str] = None) -> Optional[dict]:
+        await self._ensure_connected()
         if not self.session:
             raise RuntimeError("MCP client is not connected.")
 
@@ -107,6 +120,7 @@ class MCPClient:
         return resources
 
     async def read_resource(self, uri: str) -> Optional[dict]:
+        await self._ensure_connected()
         if not self.session:
             raise RuntimeError("MCP client is not connected.")
 

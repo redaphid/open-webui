@@ -39,6 +39,11 @@ class MCPToolCallResponse(BaseModel):
 # Maps session_id -> {"user_id": str, "mcp_clients": dict, "tools": dict}
 _active_sessions: dict[str, dict] = {}
 
+# Per-user store for MCP bindings code, so the direct /code/execute endpoint
+# can also inject bindings (not just the middleware path).
+# Maps user_id -> {"bindings": str, "session_id": str}
+_user_bindings: dict[str, dict] = {}
+
 
 def register_code_mode_session(
     session_id: str,
@@ -70,6 +75,23 @@ def unregister_code_mode_session(session_id: str):
 def get_code_mode_session(session_id: str) -> Optional[dict]:
     """Get an active code mode session by ID."""
     return _active_sessions.get(session_id)
+
+
+def store_user_bindings(user_id: str, bindings: str, session_id: str):
+    """Store MCP bindings for a user so the direct code/execute endpoint can use them."""
+    _user_bindings[user_id] = {"bindings": bindings, "session_id": session_id}
+
+
+def get_user_bindings(user_id: str) -> str:
+    """Get stored MCP bindings code for a user. Returns empty string if none."""
+    entry = _user_bindings.get(user_id)
+    if not entry:
+        return ""
+    # Only return bindings if the session is still active
+    session_id = entry.get("session_id", "")
+    if session_id and session_id not in _active_sessions:
+        return ""
+    return entry.get("bindings", "")
 
 
 @router.post("/call", response_model=MCPToolCallResponse)

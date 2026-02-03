@@ -326,16 +326,16 @@ def generate_code_mode_prompt(mcp_tools: dict[str, dict]) -> str:
         prompt += f"        - `mcp_tools.{method_name}({params_display})`: {description}\n"
 
     prompt += textwrap.dedent('''
-        **How to use MCP tools in code:**
-        - Call tools using the `mcp_tools` object: `result = mcp_tools.tool_name(param1=value1, param2=value2)`
-        - All MCP tool calls are synchronous — results are returned as plain Python data (dicts, lists, or strings), ready for direct use
-        - Do NOT `import mcp` — the `mcp_tools` object is pre-configured and available globally
-        - You can chain multiple MCP calls together in a single code block
+        **CRITICAL — How to use MCP tools in code:**
+        - `mcp_tools` is a pre-configured global object already available in your code environment. Use it directly.
+        - NEVER write `import mcp_tools` or `from mcp_tools import ...` — this will cause an error. The object is already defined for you.
+        - Call tools like this: `result = mcp_tools.tool_name(param1=value1, param2=value2)`
+        - All calls are synchronous and return plain Python data (dicts, lists, strings).
         - Print results to show the user: `print(result)`
 
         **Example:**
         ```python
-        # Get data and iterate over it
+        # mcp_tools is already available — do NOT import it
         items = mcp_tools.list_items()
         for item in items:
             print(item["name"])
