@@ -76,6 +76,27 @@
 		);
 	};
 
+	const pinHandler = (
+		messageId: string,
+		pinned: boolean,
+		pinnedBy: string | null = pinned ? ($user?.id ?? null) : null,
+		pinnedAt: number | null = pinned ? Date.now() * 1000000 : null
+	) => {
+		if (messages) {
+			messages = messages.map((message) => {
+				if (message.id === messageId) {
+					return {
+						...message,
+						is_pinned: pinned,
+						pinned_by: pinnedBy,
+						pinned_at: pinnedAt
+					};
+				}
+				return message;
+			});
+		}
+	};
+
 	const initHandler = async () => {
 		if (currentId) {
 			updateLastReadAt(currentId);
@@ -142,6 +163,10 @@
 				}
 			} else if (type === 'message:delete') {
 				messages = messages.filter((message) => message.id !== data.id);
+
+				if (threadId === data.id) {
+					threadId = null;
+				}
 			} else if (type === 'message:reply') {
 				const idx = messages.findIndex((message) => message.id === data.id);
 
@@ -284,10 +309,10 @@
 					} else {
 						return e.name;
 					}
-				}, '')} • Open WebUI</title
+				}, '')} / Open WebUI</title
 		>
 	{:else}
-		<title>#{channel?.name ?? 'Channel'} • Open WebUI</title>
+		<title>#{channel?.name ?? 'Channel'} / Open WebUI</title>
 	{/if}
 </svelte:head>
 
@@ -301,17 +326,7 @@
 		<Pane defaultSize={50} minSize={50} class="h-full flex flex-col w-full relative">
 			<Navbar
 				{channel}
-				onPin={(messageId, pinned) => {
-					messages = messages.map((message) => {
-						if (message.id === messageId) {
-							return {
-								...message,
-								is_pinned: pinned
-							};
-						}
-						return message;
-					});
-				}}
+				onPin={pinHandler}
 				onUpdate={async () => {
 					channel = await getChannelById(localStorage.token, id).catch((error) => {
 						return null;
@@ -343,6 +358,7 @@
 								onThread={(id) => {
 									threadId = id;
 								}}
+								onPin={pinHandler}
 								onLoad={async () => {
 									const newMessages = await getChannelMessages(
 										localStorage.token,
@@ -402,6 +418,7 @@
 						<Thread
 							{threadId}
 							{channel}
+							onPin={pinHandler}
 							onClose={() => {
 								threadId = null;
 							}}
@@ -424,6 +441,7 @@
 					<Thread
 						{threadId}
 						{channel}
+						onPin={pinHandler}
 						onClose={() => {
 							threadId = null;
 						}}

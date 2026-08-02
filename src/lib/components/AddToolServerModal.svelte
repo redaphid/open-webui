@@ -8,7 +8,6 @@
 	import { getContext, onMount } from 'svelte';
 	const i18n = getContext('i18n');
 
-	import { settings } from '$lib/stores';
 	import Modal from '$lib/components/common/Modal.svelte';
 	import Plus from '$lib/components/icons/Plus.svelte';
 	import Minus from '$lib/components/icons/Minus.svelte';
@@ -19,10 +18,12 @@
 	import Tags from './common/Tags.svelte';
 	import { getToolServerData } from '$lib/apis';
 	import { verifyToolServerConnection, registerOAuthClient } from '$lib/apis/configs';
-	import AccessControl from './workspace/common/AccessControl.svelte';
+	import AccessControlModal from '$lib/components/workspace/common/AccessControlModal.svelte';
+	import AccessButton from '$lib/components/common/AccessButton.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import XMark from '$lib/components/icons/XMark.svelte';
 	import Textarea from './common/Textarea.svelte';
+	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 
 	export let onSubmit: Function = () => {};
 	export let onDelete: Function = () => {};
@@ -48,7 +49,7 @@
 	let headers = '';
 
 	let functionNameFilterList = '';
-	let accessControl = {};
+	let accessGrants = [];
 
 	let id = '';
 	let name = '';
@@ -56,10 +57,22 @@
 
 	let oauthClientInfo = null;
 
+	let oauthClientId = '';
+	let oauthClientSecret = '';
+	let oauthServerUrl = '';
+	let oauthScope = '';
+	let oauthResourceParameter = 'auto';
+
 	let enable = true;
 	let loading = false;
+	let showAdvanced = false;
+	let showAccessControlModal = false;
+	let showDeleteConfirmDialog = false;
 
-	let verifyResult = null;
+	const inputClass =
+		'bg-transparent outline-hidden placeholder:text-gray-300 dark:placeholder:text-gray-700';
+	const selectClass =
+		'bg-transparent pr-5 outline-hidden placeholder:text-gray-300 dark:placeholder:text-gray-700';
 
 	const registerOAuthClientHandler = async () => {
 		if (url === '') {
@@ -72,14 +85,30 @@
 			return;
 		}
 
-		const res = await registerOAuthClient(
-			localStorage.token,
-			{
-				url: url,
-				client_id: id
-			},
-			'mcp'
-		).catch((err) => {
+		if (auth_type === 'oauth_2.1_static' && (!oauthClientId || !oauthClientSecret)) {
+			toast.error($i18n.t('Please enter Client ID and Client Secret'));
+			return;
+		}
+
+		// client_id is the tool server ID (used as the internal lookup key for both flows).
+		// For static, client_secret signals the backend to use the static credential path.
+		// The actual OAuth client_id/secret come from the connection info at save time.
+		const formData: {
+			url: string;
+			client_id: string;
+			client_secret?: string;
+			oauth_server_url?: string;
+			oauth_scope?: string;
+		} = {
+			url: url,
+			client_id: id,
+			...(oauthScope ? { oauth_scope: oauthScope } : {}),
+			...(auth_type === 'oauth_2.1_static'
+				? { client_secret: oauthClientSecret, oauth_server_url: oauthServerUrl }
+				: {})
+		};
+
+		const res = await registerOAuthClient(localStorage.token, formData, 'mcp').catch((err) => {
 			toast.error($i18n.t('Registration failed'));
 			return null;
 		});
@@ -98,8 +127,6 @@
 	};
 
 	const verifyHandler = async () => {
-		verifyResult = null;
-
 		if (url === '') {
 			toast.error($i18n.t('Please enter a valid URL'));
 			return;
@@ -140,7 +167,6 @@
 			});
 
 			if (res) {
-				verifyResult = res;
 				toast.success($i18n.t('Connection successful'));
 				console.debug('Connection successful', res);
 			}
@@ -154,7 +180,7 @@
 				key,
 				config: {
 					enable: enable,
-					access_control: accessControl
+					access_grants: accessGrants
 				},
 				info: {
 					id,
@@ -166,7 +192,6 @@
 			});
 
 			if (res) {
-				verifyResult = res;
 				toast.success($i18n.t('Connection successful'));
 				console.debug('Connection successful', res);
 			}
@@ -208,11 +233,13 @@
 					id = data.info.id ?? '';
 					name = data.info.name ?? '';
 					description = data.info.description ?? '';
+					oauthScope = data.info.oauth_scope ?? '';
+					oauthResourceParameter = data.info.oauth_resource_parameter ?? 'auto';
 				}
 
 				if (data.config) {
 					enable = data.config.enable ?? true;
-					accessControl = data.config.access_control ?? {};
+					accessGrants = data.config.access_grants ?? [];
 				}
 
 				toast.success($i18n.t('Import successful'));
@@ -241,7 +268,13 @@
 				info: {
 					id: id,
 					name: name,
-					description: description
+					description: description,
+					...(type === 'mcp' && ['oauth_2.1', 'oauth_2.1_static'].includes(auth_type)
+						? {
+								...(oauthScope ? { oauth_scope: oauthScope } : {}),
+								oauth_resource_parameter: oauthResourceParameter
+							}
+						: {})
 				}
 			}
 		]);
@@ -256,15 +289,23 @@
 	const submitHandler = async () => {
 		loading = true;
 
-		// remove trailing slash from url
-		url = url.replace(/\/$/, '');
+		// remove trailing slash from url for non-MCP connections
+		// MCP servers may require a trailing slash; stripping it can cause
+		// 301 redirects that lose auth headers (see #21179)
+		if (type !== 'mcp') {
+			url = url.replace(/\/$/, '');
+		}
 		if (id.includes(':') || id.includes('|')) {
 			toast.error($i18n.t('ID cannot contain ":" or "|" characters'));
 			loading = false;
 			return;
 		}
 
-		if (type === 'mcp' && auth_type === 'oauth_2.1' && !oauthClientInfo) {
+		if (
+			type === 'mcp' &&
+			['oauth_2.1', 'oauth_2.1_static'].includes(auth_type) &&
+			!oauthClientInfo
+		) {
 			toast.error($i18n.t('Please register the OAuth client'));
 			loading = false;
 			return;
@@ -311,13 +352,26 @@
 			config: {
 				enable: enable,
 				function_name_filter_list: functionNameFilterList,
-				access_control: accessControl
+				access_grants: accessGrants
 			},
 			info: {
 				id: id,
 				name: name,
 				description: description,
-				...(oauthClientInfo ? { oauth_client_info: oauthClientInfo } : {})
+				...(type === 'mcp' && ['oauth_2.1', 'oauth_2.1_static'].includes(auth_type)
+					? {
+							...(oauthScope ? { oauth_scope: oauthScope } : {}),
+							oauth_resource_parameter: oauthResourceParameter
+						}
+					: {}),
+				...(oauthClientInfo ? { oauth_client_info: oauthClientInfo } : {}),
+				...(auth_type === 'oauth_2.1_static'
+					? {
+							oauth_client_id: oauthClientId,
+							oauth_client_secret: oauthClientSecret,
+							oauth_server_url: oauthServerUrl
+						}
+					: {})
 			}
 		};
 
@@ -342,11 +396,15 @@
 		description = '';
 
 		oauthClientInfo = null;
-		verifyResult = null;
+		oauthClientId = '';
+		oauthClientSecret = '';
+		oauthServerUrl = '';
+		oauthScope = '';
+		oauthResourceParameter = 'auto';
 
 		enable = true;
 		functionNameFilterList = '';
-		accessControl = null;
+		accessGrants = [];
 	};
 
 	const init = () => {
@@ -367,16 +425,17 @@
 			name = connection.info?.name ?? '';
 			description = connection.info?.description ?? '';
 			oauthClientInfo = connection.info?.oauth_client_info ?? null;
+			oauthClientId = connection.info?.oauth_client_id ?? '';
+			oauthClientSecret = connection.info?.oauth_client_secret ?? '';
+			oauthServerUrl = connection.info?.oauth_server_url ?? '';
+			oauthScope = connection.info?.oauth_scope ?? '';
+			oauthResourceParameter = connection.info?.oauth_resource_parameter ?? 'auto';
 
 			enable = connection.config?.enable ?? true;
 			functionNameFilterList = connection.config?.function_name_filter_list ?? '';
-			accessControl = connection.config?.access_control ?? null;
+			accessGrants = connection.config?.access_grants ?? [];
 		}
 	};
-
-	$: if (url || type || auth_type) {
-		verifyResult = null;
-	}
 
 	$: if (show) {
 		init();
@@ -446,61 +505,103 @@
 					}}
 				>
 					<div class="px-1">
-						{#if !direct}
-							<div class="grid grid-cols-2 gap-2 mb-2">
-								<button
-									type="button"
-									class="p-2.5 rounded-xl border text-left transition {['', 'openapi'].includes(type)
-										? 'border-gray-800 dark:border-white bg-gray-50 dark:bg-gray-800'
-										: 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'}"
-									on:click={() => {
-										type = 'openapi';
-									}}
-								>
-									<div class="text-sm font-medium">{$i18n.t('OpenAPI')}</div>
-									<div
-										class="text-xs {($settings?.highContrastMode ?? false)
-											? 'text-gray-700 dark:text-gray-200'
-											: 'text-gray-500'}"
-									>
-										{$i18n.t('REST API with spec')}
-									</div>
-								</button>
-								<button
-									type="button"
-									class="p-2.5 rounded-xl border text-left transition {type === 'mcp'
-										? 'border-gray-800 dark:border-white bg-gray-50 dark:bg-gray-800'
-										: 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'}"
-									on:click={() => {
-										type = 'mcp';
-									}}
-								>
-									<div class="text-sm font-medium">{$i18n.t('MCP')}</div>
-									<div
-										class="text-xs {($settings?.highContrastMode ?? false)
-											? 'text-gray-700 dark:text-gray-200'
-											: 'text-gray-500'}"
-									>
-										{$i18n.t('Streamable HTTP')}
-									</div>
-								</button>
+						<div class="flex gap-2 mb-1.5">
+							<div class="flex w-full justify-between items-center">
+								<div class=" text-xs text-gray-500">{$i18n.t('Type')}</div>
+
+								<div class="">
+									{#if !direct}
+										<button
+											on:click={() => {
+												type = ['', 'openapi'].includes(type) ? 'mcp' : 'openapi';
+											}}
+											type="button"
+											class=" text-xs text-gray-700 dark:text-gray-300"
+										>
+											{#if ['', 'openapi'].includes(type)}
+												{$i18n.t('OpenAPI')}
+											{:else if type === 'mcp'}
+												{$i18n.t('MCP')}
+												<span class="text-gray-500">{$i18n.t('Streamable HTTP')}</span>
+											{/if}
+										</button>
+									{:else}
+										<div class="text-xs text-gray-700 dark:text-gray-300">
+											{$i18n.t('OpenAPI')}
+										</div>
+									{/if}
+								</div>
 							</div>
-						{/if}
+						</div>
+
+						<div class="flex gap-2">
+							<div class="flex flex-col flex-1">
+								<div class="flex justify-between mb-0.5">
+									<label for="enter-name" class={`text-xs text-gray-500`}>{$i18n.t('Name')}</label>
+								</div>
+
+								<div class="flex flex-1 items-center">
+									<input
+										id="enter-name"
+										class={`w-full flex-1 text-sm ${inputClass}`}
+										type="text"
+										bind:value={name}
+										placeholder={$i18n.t('Enter name')}
+										autocomplete="off"
+									/>
+								</div>
+							</div>
+							{#if !direct}
+								<div class="flex flex-col flex-1">
+									<div class="flex justify-between mb-0.5">
+										<label for="enter-id" class={`text-xs text-gray-500`}
+											>{$i18n.t('ID')}
+											{#if type !== 'mcp'}<span class="opacity-50">({$i18n.t('optional')})</span
+												>{/if}</label
+										>
+									</div>
+									<div class="flex flex-1 items-center">
+										<input
+											id="enter-id"
+											class={`w-full flex-1 text-sm font-mono ${inputClass}`}
+											type="text"
+											bind:value={id}
+											placeholder="auto"
+											autocomplete="off"
+											required={type === 'mcp'}
+										/>
+									</div>
+								</div>
+							{/if}
+						</div>
+
+						<div class="flex flex-col w-full mt-1 mb-1.5">
+							<label for="description" class={`mb-0.5 text-xs text-gray-500`}
+								>{$i18n.t('Description')}</label
+							>
+
+							<div class="flex-1">
+								<input
+									id="description"
+									class={`w-full text-sm ${inputClass}`}
+									type="text"
+									bind:value={description}
+									placeholder={$i18n.t('Enter description')}
+									autocomplete="off"
+								/>
+							</div>
+						</div>
 
 						<div class="flex gap-2">
 							<div class="flex flex-col w-full">
 								<div class="flex justify-between mb-0.5">
-									<label
-										for="api-base-url"
-										class={`text-xs ${($settings?.highContrastMode ?? false) ? 'text-gray-800 dark:text-gray-100' : 'text-gray-500'}`}
-										>{$i18n.t('URL')}</label
-									>
+									<label for="api-base-url" class={`text-xs text-gray-500`}>{$i18n.t('URL')}</label>
 								</div>
 
 								<div class="flex flex-1 items-center">
 									<input
 										id="api-base-url"
-										class={`w-full flex-1 text-sm bg-transparent ${($settings?.highContrastMode ?? false) ? 'placeholder:text-gray-700 dark:placeholder:text-gray-100' : 'outline-hidden placeholder:text-gray-300 dark:placeholder:text-gray-700'}`}
+										class={`w-full flex-1 text-sm ${inputClass}`}
 										type="text"
 										bind:value={url}
 										placeholder={$i18n.t('API Base URL')}
@@ -513,7 +614,7 @@
 										className="shrink-0 flex items-center mr-1"
 									>
 										<button
-											class="self-center p-1 bg-transparent hover:bg-gray-100 dark:bg-gray-900 dark:hover:bg-gray-850 rounded-lg transition"
+											class="self-center p-1 bg-transparent hover:bg-gray-100 dark:hover:bg-gray-850 rounded-lg transition"
 											on:click={() => {
 												verifyHandler();
 											}}
@@ -543,121 +644,44 @@
 							</div>
 						</div>
 
-						{#if verifyResult}
-							<div class="mt-2 p-2.5 rounded-xl bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700">
-								<div class="text-xs font-medium text-green-600 dark:text-green-400 mb-1">{$i18n.t('Connection verified')}</div>
-								{#if verifyResult.specs}
-									<div class="text-xs text-gray-500 dark:text-gray-400 mb-0.5">{$i18n.t('{{COUNT}} tools available', { COUNT: verifyResult.specs.length })}</div>
-									{#each verifyResult.specs.slice(0, 5) as spec}
-										<div class="text-xs text-gray-600 dark:text-gray-300">&bull; {spec.name}</div>
-									{/each}
-									{#if verifyResult.specs.length > 5}
-										<div class="text-xs text-gray-400 dark:text-gray-500">{$i18n.t('... and {{COUNT}} more', { COUNT: verifyResult.specs.length - 5 })}</div>
-									{/if}
-								{:else if verifyResult.openapi}
-									<div class="text-xs text-gray-600 dark:text-gray-300">{verifyResult.openapi.info?.title ?? ''} {verifyResult.openapi.info?.version ? 'v' + verifyResult.openapi.info.version : ''}</div>
-								{/if}
-							</div>
-						{/if}
-
-						{#if ['', 'openapi'].includes(type)}
-							<div class="flex gap-2 mt-2">
-								<div class="flex flex-col w-full">
-									<div class="flex justify-between items-center mb-0.5">
-										<div class="flex gap-2 items-center">
-											<div
-												for="select-bearer-or-session"
-												class={`text-xs ${($settings?.highContrastMode ?? false) ? 'text-gray-800 dark:text-gray-100' : 'text-gray-500'}`}
-											>
-												{$i18n.t('OpenAPI Spec')}
-											</div>
-										</div>
-									</div>
-
-									<div class="flex gap-2">
-										<div class="flex-shrink-0 self-start">
-											<select
-												id="select-bearer-or-session"
-												class={`dark:bg-gray-900 w-full text-sm bg-transparent pr-5 ${($settings?.highContrastMode ?? false) ? 'placeholder:text-gray-700 dark:placeholder:text-gray-100' : 'outline-hidden placeholder:text-gray-300 dark:placeholder:text-gray-700'}`}
-												bind:value={spec_type}
-											>
-												<option value="url">{$i18n.t('URL')}</option>
-												<option value="json">{$i18n.t('JSON')}</option>
-											</select>
-										</div>
-
-										<div class="flex flex-1 items-center">
-											{#if spec_type === 'url'}
-												<div class="flex-1 flex items-center">
-													<label for="url-or-path" class="sr-only"
-														>{$i18n.t('openapi.json URL or Path')}</label
-													>
-													<input
-														class={`w-full text-sm bg-transparent ${($settings?.highContrastMode ?? false) ? 'placeholder:text-gray-700 dark:placeholder:text-gray-100' : 'outline-hidden placeholder:text-gray-300 dark:placeholder:text-gray-700'}`}
-														type="text"
-														id="url-or-path"
-														bind:value={path}
-														placeholder={$i18n.t('openapi.json URL or Path')}
-														autocomplete="off"
-														required
-													/>
-												</div>
-											{:else if spec_type === 'json'}
-												<div
-													class={`text-xs w-full self-center translate-y-[1px] ${($settings?.highContrastMode ?? false) ? 'text-gray-800 dark:text-gray-100' : 'text-gray-500'}`}
-												>
-													<label for="url-or-path" class="sr-only">{$i18n.t('JSON Spec')}</label>
-													<textarea
-														class={`w-full text-sm bg-transparent ${($settings?.highContrastMode ?? false) ? 'placeholder:text-gray-700 dark:placeholder:text-gray-100' : 'outline-hidden placeholder:text-gray-300 dark:placeholder:text-gray-700 text-black dark:text-white'}`}
-														bind:value={spec}
-														placeholder={$i18n.t('JSON Spec')}
-														autocomplete="off"
-														required
-														rows="5"
-													/>
-												</div>
-											{/if}
-										</div>
-									</div>
-
-									{#if ['', 'url'].includes(spec_type)}
-										<div
-											class={`text-xs mt-1 ${($settings?.highContrastMode ?? false) ? 'text-gray-800 dark:text-gray-100' : 'text-gray-500'}`}
-										>
-											{$i18n.t(`WebUI will make requests to "{{url}}"`, {
-												url: path.includes('://')
-													? path
-													: `${url}${path.startsWith('/') ? '' : '/'}${path}`
-											})}
-										</div>
-									{/if}
-								</div>
-							</div>
-						{/if}
-
 						<div class="flex gap-2 mt-2">
 							<div class="flex flex-col w-full">
 								<div class="flex justify-between items-center">
 									<div class="flex gap-2 items-center">
-										<div
-											for="select-bearer-or-session"
-											class={`text-xs ${($settings?.highContrastMode ?? false) ? 'text-gray-800 dark:text-gray-100' : 'text-gray-500'}`}
-										>
+										<div for="select-bearer-or-session" class={`text-xs text-gray-500`}>
 											{$i18n.t('Auth')}
 										</div>
 									</div>
 
-									{#if auth_type === 'oauth_2.1'}
-										<div class="flex items-center">
+									{#if ['oauth_2.1', 'oauth_2.1_static'].includes(auth_type)}
+										<div class="flex items-center gap-2">
+											<div class="flex flex-col justify-end items-center shrink-0">
+												<Tooltip
+													content={oauthClientInfo
+														? $i18n.t('Register Again')
+														: $i18n.t('Register Client')}
+												>
+													<button
+														class=" text-xs underline dark:text-gray-500 dark:hover:text-gray-200 text-gray-700 hover:text-gray-900 transition"
+														type="button"
+														on:click={() => {
+															registerOAuthClientHandler();
+														}}
+													>
+														{$i18n.t('Register Client')}
+													</button>
+												</Tooltip>
+											</div>
+
 											{#if !oauthClientInfo}
 												<div
-													class="text-xs font-medium px-1.5 py-0.5 rounded-md bg-yellow-500/20 text-yellow-700 dark:text-yellow-200"
+													class="text-xs font-normal px-1.5 rounded-md bg-yellow-500/20 text-yellow-700 dark:text-yellow-200"
 												>
 													{$i18n.t('Not Registered')}
 												</div>
 											{:else}
 												<div
-													class="text-xs font-medium px-1.5 py-0.5 rounded-md bg-green-500/20 text-green-700 dark:text-green-200"
+													class="text-xs font-normal px-1.5 rounded-md bg-green-500/20 text-green-700 dark:text-green-200"
 												>
 													{$i18n.t('Registered')}
 												</div>
@@ -670,7 +694,7 @@
 									<div class="flex-shrink-0 self-start">
 										<select
 											id="select-bearer-or-session"
-											class={`dark:bg-gray-900 w-full text-sm bg-transparent pr-5 ${($settings?.highContrastMode ?? false) ? 'placeholder:text-gray-700 dark:placeholder:text-gray-100' : 'outline-hidden placeholder:text-gray-300 dark:placeholder:text-gray-700'}`}
+											class={`w-full text-sm ${selectClass}`}
 											bind:value={auth_type}
 										>
 											<option value="none">{$i18n.t('None')}</option>
@@ -682,6 +706,7 @@
 												<option value="system_oauth">{$i18n.t('OAuth')}</option>
 												{#if type === 'mcp'}
 													<option value="oauth_2.1">{$i18n.t('OAuth 2.1')}</option>
+													<option value="oauth_2.1_static">{$i18n.t('OAuth 2.1 (Static)')}</option>
 												{/if}
 											{/if}
 										</select>
@@ -695,28 +720,44 @@
 												required={false}
 											/>
 										{:else if auth_type === 'none'}
-											<div
-												class={`text-xs self-center translate-y-[1px] ${($settings?.highContrastMode ?? false) ? 'text-gray-800 dark:text-gray-100' : 'text-gray-500'}`}
-											>
+											<div class={`text-xs self-center translate-y-[1px] text-gray-500`}>
 												{$i18n.t('No authentication')}
 											</div>
 										{:else if auth_type === 'session'}
-											<div
-												class={`text-xs self-center translate-y-[1px] ${($settings?.highContrastMode ?? false) ? 'text-gray-800 dark:text-gray-100' : 'text-gray-500'}`}
-											>
+											<div class={`text-xs self-center translate-y-[1px] text-gray-500`}>
 												{$i18n.t('Forwards system user session credentials to authenticate')}
 											</div>
 										{:else if auth_type === 'system_oauth'}
-											<div
-												class={`text-xs self-center translate-y-[1px] ${($settings?.highContrastMode ?? false) ? 'text-gray-800 dark:text-gray-100' : 'text-gray-500'}`}
-											>
+											<div class={`text-xs self-center translate-y-[1px] text-gray-500`}>
 												{$i18n.t('Forwards system user OAuth access token to authenticate')}
 											</div>
 										{:else if auth_type === 'oauth_2.1'}
 											<div
-												class={`flex items-center text-xs self-center translate-y-[1px] ${($settings?.highContrastMode ?? false) ? 'text-gray-800 dark:text-gray-100' : 'text-gray-500'}`}
+												class={`flex items-center text-xs self-center translate-y-[1px] text-gray-500`}
 											>
 												{$i18n.t('Uses OAuth 2.1 Dynamic Client Registration')}
+											</div>
+										{:else if auth_type === 'oauth_2.1_static'}
+											<div class="flex flex-col gap-1.5 w-full mt-0.5">
+												<SensitiveInput
+													bind:value={oauthClientId}
+													placeholder={$i18n.t('Client ID')}
+													required={false}
+												/>
+												<SensitiveInput
+													bind:value={oauthClientSecret}
+													placeholder={$i18n.t('Client Secret')}
+													required={false}
+												/>
+												<div class="flex flex-1 items-center">
+													<input
+														class={`w-full text-sm ${inputClass}`}
+														type="text"
+														bind:value={oauthServerUrl}
+														placeholder={$i18n.t('OAuth Server URL')}
+														autocomplete="off"
+													/>
+												</div>
 											</div>
 										{/if}
 									</div>
@@ -724,141 +765,188 @@
 							</div>
 						</div>
 
-						{#if auth_type === 'oauth_2.1' && !direct}
-							<div class="mt-2 p-3 rounded-xl border border-gray-200 dark:border-gray-700">
-								<div class="flex items-center justify-between mb-2">
-									<div class="text-xs font-medium">{$i18n.t('OAuth 2.1 Client Registration')}</div>
-								</div>
-								<div class="text-xs text-gray-500 dark:text-gray-400 mb-2.5">
-									{$i18n.t('Register your app with the OAuth provider to allow users to authorize. Ensure the server URL and ID are set before registering.')}
-								</div>
-								<button
-									class="px-3 py-1.5 text-xs font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full"
-									type="button"
-									on:click={() => {
-										registerOAuthClientHandler();
-									}}
+						<div class="flex items-center justify-between">
+							<button
+								type="button"
+								class="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition mt-2"
+								on:click={() => (showAdvanced = !showAdvanced)}
+							>
+								<svg
+									xmlns="http://www.w3.org/2000/svg"
+									viewBox="0 0 20 20"
+									fill="currentColor"
+									class="w-3 h-3 transition-transform {showAdvanced ? 'rotate-90' : ''}"
 								>
-									{oauthClientInfo ? $i18n.t('Re-register Client') : $i18n.t('Register Client')}
-								</button>
-								{#if oauthClientInfo}
-									<div class="text-xs text-green-600 dark:text-green-400 mt-2">
-										{$i18n.t('Client registered successfully. Save the connection to persist.')}
+									<path
+										fill-rule="evenodd"
+										d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z"
+										clip-rule="evenodd"
+									/>
+								</svg>
+								{$i18n.t('Advanced')}
+							</button>
+
+							{#if !direct}
+								<AccessButton
+									className="mt-2"
+									on:click={() => {
+										showAccessControlModal = true;
+									}}
+								/>
+							{/if}
+						</div>
+
+						{#if showAdvanced}
+							{#if ['', 'openapi'].includes(type)}
+								<div class="flex gap-2 mt-2">
+									<div class="flex flex-col w-full">
+										<div class="flex justify-between items-center mb-0.5">
+											<div class="flex gap-2 items-center">
+												<div for="select-bearer-or-session" class={`text-xs text-gray-500`}>
+													{$i18n.t('OpenAPI Spec')}
+												</div>
+											</div>
+										</div>
+
+										<div class="flex gap-2">
+											<div class="flex-shrink-0 self-start">
+												<select
+													id="select-bearer-or-session"
+													class={`w-full text-sm ${selectClass}`}
+													bind:value={spec_type}
+												>
+													<option value="url">{$i18n.t('URL')}</option>
+													<option value="json">{$i18n.t('JSON')}</option>
+												</select>
+											</div>
+
+											<div class="flex flex-1 items-center">
+												{#if spec_type === 'url'}
+													<div class="flex-1 flex items-center">
+														<label for="url-or-path" class="sr-only"
+															>{$i18n.t('openapi.json URL or Path')}</label
+														>
+														<input
+															class={`w-full text-sm ${inputClass}`}
+															type="text"
+															id="url-or-path"
+															bind:value={path}
+															placeholder={$i18n.t('openapi.json URL or Path')}
+															autocomplete="off"
+															required
+														/>
+													</div>
+												{:else if spec_type === 'json'}
+													<div class={`text-xs w-full self-center translate-y-[1px] text-gray-500`}>
+														<label for="url-or-path" class="sr-only">{$i18n.t('JSON Spec')}</label>
+														<textarea
+															class={`w-full text-sm ${inputClass}`}
+															bind:value={spec}
+															placeholder={$i18n.t('JSON Spec')}
+															autocomplete="off"
+															required
+															rows="5"
+														/>
+													</div>
+												{/if}
+											</div>
+										</div>
+
+										{#if ['', 'url'].includes(spec_type)}
+											<div class={`text-xs mt-1 text-gray-500`}>
+												{$i18n.t(`WebUI will make requests to "{{url}}"`, {
+													url: path.includes('://')
+														? path
+														: `${url}${path.startsWith('/') ? '' : '/'}${path}`
+												})}
+											</div>
+										{/if}
 									</div>
-								{/if}
-							</div>
+								</div>
+							{/if}
+
+							{#if type === 'mcp' && ['oauth_2.1', 'oauth_2.1_static'].includes(auth_type)}
+								<div class="flex gap-2 mt-2">
+									<div class="flex flex-col w-full">
+										<label for="oauth-scope" class={`mb-0.5 text-xs text-gray-500`}
+											>{$i18n.t('OAuth Scopes')}</label
+										>
+
+										<div class="flex flex-1 items-center">
+											<input
+												id="oauth-scope"
+												class={`w-full text-sm ${inputClass}`}
+												type="text"
+												bind:value={oauthScope}
+												placeholder={$i18n.t('Use discovered scopes')}
+												autocomplete="off"
+											/>
+										</div>
+									</div>
+								</div>
+
+								<div class="flex gap-2 mt-2">
+									<div class="flex flex-col w-full">
+										<label for="oauth-resource-parameter" class={`mb-0.5 text-xs text-gray-500`}
+											>{$i18n.t('OAuth Resource Parameter')}</label
+										>
+
+										<div class="flex flex-1 items-center">
+											<select
+												id="oauth-resource-parameter"
+												class={`w-full text-sm ${selectClass}`}
+												bind:value={oauthResourceParameter}
+											>
+												<option value="auto">{$i18n.t('Automatic')}</option>
+												<option value="include">{$i18n.t('Include')}</option>
+												<option value="omit">{$i18n.t('Omit')}</option>
+											</select>
+										</div>
+									</div>
+								</div>
+							{/if}
+
+							{#if !direct}
+								<div class="flex gap-2 mt-2">
+									<div class="flex flex-col w-full">
+										<label
+											for="headers-input"
+											class={`mb-0.5 text-xs text-gray-500
+									`}>{$i18n.t('Headers')}</label
+										>
+
+										<div class="flex-1">
+											<Tooltip
+												content={$i18n.t(
+													'Enter additional headers in JSON format (e.g. {"X-Custom-Header": "value"}'
+												)}
+											>
+												<Textarea
+													className="w-full text-sm outline-hidden"
+													bind:value={headers}
+													placeholder={$i18n.t('Enter additional headers in JSON format')}
+													required={false}
+													minSize={30}
+												/>
+											</Tooltip>
+										</div>
+									</div>
+								</div>
+							{/if}
 						{/if}
 
 						{#if !direct}
-							<div class="flex gap-2 mt-2">
-								<div class="flex flex-col w-full">
-									<label
-										for="headers-input"
-										class={`mb-0.5 text-xs text-gray-500
-								${($settings?.highContrastMode ?? false) ? 'text-gray-800 dark:text-gray-100' : ''}`}
-										>{$i18n.t('Headers')}</label
-									>
-
-									<div class="flex-1">
-										<Tooltip
-											content={$i18n.t(
-												'Enter additional headers in JSON format (e.g. {"X-Custom-Header": "value"}'
-											)}
-										>
-											<Textarea
-												className="w-full text-sm outline-hidden"
-												bind:value={headers}
-												placeholder={$i18n.t('Enter additional headers in JSON format')}
-												required={false}
-												minSize={30}
-											/>
-										</Tooltip>
-									</div>
-								</div>
-							</div>
-
-							<hr class=" border-gray-100 dark:border-gray-700/10 my-2.5 w-full" />
-
-							<div class="flex gap-2">
-								<div class="flex flex-col w-full">
-									<label
-										for="enter-id"
-										class={`mb-0.5 text-xs ${($settings?.highContrastMode ?? false) ? 'text-gray-800 dark:text-gray-100' : 'text-gray-500'}`}
-										>{$i18n.t('ID')}
-
-										{#if type !== 'mcp'}
-											<span class="text-xs text-gray-200 dark:text-gray-800 ml-0.5"
-												>{$i18n.t('Optional')}</span
-											>
-										{/if}
-									</label>
-
-									<div class="flex-1">
-										<input
-											id="enter-id"
-											class={`w-full text-sm bg-transparent ${($settings?.highContrastMode ?? false) ? 'placeholder:text-gray-700 dark:placeholder:text-gray-100' : 'outline-hidden placeholder:text-gray-300 dark:placeholder:text-gray-700'}`}
-											type="text"
-											bind:value={id}
-											placeholder={$i18n.t('Enter ID')}
-											autocomplete="off"
-											required={type === 'mcp'}
-										/>
-									</div>
-								</div>
-							</div>
-
-							<div class="flex gap-2 mt-2">
-								<div class="flex flex-col w-full">
-									<label
-										for="enter-name"
-										class={`mb-0.5 text-xs ${($settings?.highContrastMode ?? false) ? 'text-gray-800 dark:text-gray-100' : 'text-gray-500'}`}
-										>{$i18n.t('Name')}
-									</label>
-
-									<div class="flex-1">
-										<input
-											id="enter-name"
-											class={`w-full text-sm bg-transparent ${($settings?.highContrastMode ?? false) ? 'placeholder:text-gray-700 dark:placeholder:text-gray-100' : 'outline-hidden placeholder:text-gray-300 dark:placeholder:text-gray-700'}`}
-											type="text"
-											bind:value={name}
-											placeholder={$i18n.t('Enter name')}
-											autocomplete="off"
-											required
-										/>
-									</div>
-								</div>
-							</div>
+							<hr class=" border-gray-100/50 dark:border-gray-700/10 my-2.5 w-full" />
 
 							<div class="flex flex-col w-full mt-2">
-								<label
-									for="description"
-									class={`mb-1 text-xs ${($settings?.highContrastMode ?? false) ? 'text-gray-800 dark:text-gray-100 placeholder:text-gray-700 dark:placeholder:text-gray-100' : 'outline-hidden placeholder:text-gray-300 dark:placeholder:text-gray-700 text-gray-500'}`}
-									>{$i18n.t('Description')}</label
-								>
-
-								<div class="flex-1">
-									<input
-										id="description"
-										class={`w-full text-sm bg-transparent ${($settings?.highContrastMode ?? false) ? 'placeholder:text-gray-700 dark:placeholder:text-gray-100' : 'outline-hidden placeholder:text-gray-300 dark:placeholder:text-gray-700'}`}
-										type="text"
-										bind:value={description}
-										placeholder={$i18n.t('Enter description')}
-										autocomplete="off"
-									/>
-								</div>
-							</div>
-
-							<div class="flex flex-col w-full mt-2">
-								<label
-									for="function-name-filter-list"
-									class={`mb-1 text-xs ${($settings?.highContrastMode ?? false) ? 'text-gray-800 dark:text-gray-100 placeholder:text-gray-700 dark:placeholder:text-gray-100' : 'outline-hidden placeholder:text-gray-300 dark:placeholder:text-gray-700 text-gray-500'}`}
+								<label for="function-name-filter-list" class={`mb-1 text-xs text-gray-500`}
 									>{$i18n.t('Function Name Filter List')}</label
 								>
 
 								<div class="flex-1">
 									<input
 										id="function-name-filter-list"
-										class={`w-full text-sm bg-transparent ${($settings?.highContrastMode ?? false) ? 'placeholder:text-gray-700 dark:placeholder:text-gray-100' : 'outline-hidden placeholder:text-gray-300 dark:placeholder:text-gray-700'}`}
+										class={`w-full text-sm ${inputClass}`}
 										type="text"
 										bind:value={functionNameFilterList}
 										placeholder={$i18n.t('Enter function name filter list (e.g. func1, !func2)')}
@@ -866,69 +954,73 @@
 									/>
 								</div>
 							</div>
-
-							<hr class=" border-gray-100 dark:border-gray-700/10 my-2.5 w-full" />
-
-							<div class="my-2">
-								<AccessControl bind:accessControl />
-							</div>
 						{/if}
 					</div>
 
 					{#if type === 'mcp'}
 						<div
-							class=" bg-yellow-500/20 text-yellow-700 dark:text-yellow-200 rounded-2xl text-xs px-4 py-3 mb-2"
+							class=" bg-yellow-500/20 text-yellow-700 dark:text-yellow-200 rounded-2xl text-xs px-4 py-3 mb-2 mt-1"
 						>
-							<span class="font-medium">
+							<span class="font-normal">
 								{$i18n.t('Warning')}:
 							</span>
 							{$i18n.t(
 								'MCP support is experimental and its specification changes often, which can lead to incompatibilities. OpenAPI specification support is directly maintained by the Open WebUI team, making it the more reliable option for compatibility.'
 							)}
 
-							<a
-								class="font-medium underline"
-								href="https://docs.openwebui.com/features/mcp"
-								target="_blank">{$i18n.t('Read more →')}</a
+							<a class="font-normal underline" href="https://docs.openwebui.com/" target="_blank"
+								>{$i18n.t('Read more →')}</a
 							>
 						</div>
 					{/if}
 
-					<div class="flex justify-between pt-3 text-sm font-medium gap-1.5">
-						<div></div>
-						<div class="flex gap-1.5">
+					<div class="flex justify-between items-center pt-3 text-sm font-medium">
+						<div>
 							{#if edit}
 								<button
-									class="px-3.5 py-1.5 text-sm font-medium dark:bg-black dark:hover:bg-gray-900 dark:text-white bg-white text-black hover:bg-gray-100 transition rounded-full flex flex-row space-x-1 items-center"
+									class="px-1 py-1.5 text-sm font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:underline transition"
 									type="button"
 									on:click={() => {
-										onDelete();
-										show = false;
+										showDeleteConfirmDialog = true;
 									}}
 								>
 									{$i18n.t('Delete')}
 								</button>
 							{/if}
-
-							<button
-								class="px-3.5 py-1.5 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full flex flex-row space-x-1 items-center {loading
-									? ' cursor-not-allowed'
-									: ''}"
-								type="submit"
-								disabled={loading}
-							>
-								{$i18n.t('Save')}
-
-								{#if loading}
-									<div class="ml-2 self-center">
-										<Spinner />
-									</div>
-								{/if}
-							</button>
 						</div>
+
+						<button
+							class="px-3.5 py-1.5 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full flex items-center gap-2 whitespace-nowrap {loading
+								? ' cursor-not-allowed'
+								: ''}"
+							type="submit"
+							disabled={loading}
+						>
+							{$i18n.t('Save')}
+
+							{#if loading}
+								<span class="shrink-0">
+									<Spinner />
+								</span>
+							{/if}
+						</button>
 					</div>
 				</form>
 			</div>
 		</div>
 	</div>
 </Modal>
+
+<AccessControlModal bind:show={showAccessControlModal} bind:accessGrants />
+
+<ConfirmDialog
+	bind:show={showDeleteConfirmDialog}
+	message={$i18n.t(
+		'Are you sure you want to delete this connection? This action cannot be undone.'
+	)}
+	confirmLabel={$i18n.t('Delete')}
+	on:confirm={() => {
+		onDelete();
+		show = false;
+	}}
+/>

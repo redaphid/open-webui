@@ -37,7 +37,7 @@
 			name: data.name,
 			meta: data.meta,
 			content: data.content,
-			access_control: data.access_control
+			access_grants: data.access_grants
 		}).catch((error) => {
 			toast.error(`${error}`);
 			return null;
@@ -82,16 +82,18 @@
 
 {#if mounted}
 	{#key tool?.content}
-		<ToolkitEditor
-			id={tool?.id ?? ''}
-			name={tool?.name ?? ''}
-			meta={tool?.meta ?? { description: '' }}
-			content={tool?.content ?? ''}
-			accessControl={tool?.access_control !== undefined ? tool.access_control : {}}
-			{clone}
-			onSave={(value) => {
-				saveHandler(value);
-			}}
-		/>
+		<div class="h-full min-w-0 overflow-x-hidden">
+			<ToolkitEditor
+				id={tool?.id ?? ''}
+				name={tool?.name ?? ''}
+				meta={tool?.meta ?? { description: '' }}
+				content={tool?.content ?? ''}
+				accessGrants={tool?.access_grants !== undefined ? tool.access_grants : []}
+				{clone}
+				onSave={(value) => {
+					saveHandler(value);
+				}}
+			/>
+		</div>
 	{/key}
 {/if}
