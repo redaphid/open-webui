@@ -940,6 +940,7 @@ async def daemon_stop(sid, data):
 @sio.event
 async def disconnect(sid, reason=None):
     if sid in SESSION_POOL:
+        user = SESSION_POOL.get(sid) or {}
         del SESSION_POOL[sid]
 
         # Clean up USAGE_POOL entries for this session

@@ -9,8 +9,8 @@ from open_webui.models.templates import (
 )
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.utils.auth import get_verified_user
-from open_webui.internal.db import get_session
-from sqlalchemy.orm import Session
+from open_webui.internal.db import get_async_session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter()
 
@@ -21,10 +21,10 @@ router = APIRouter()
 
 @router.get("/", response_model=list[TemplateUserResponse])
 async def get_templates(
-    user=Depends(get_verified_user), db: Session = Depends(get_session)
+    user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)
 ):
     """Get all templates for the current user."""
-    return Templates.get_templates_by_user_id(user.id, db=db)
+    return await Templates.get_templates_by_user_id(user.id, db=db)
 
 
 ############################
@@ -36,10 +36,10 @@ async def get_templates(
 async def create_new_template(
     form_data: TemplateForm,
     user=Depends(get_verified_user),
-    db: Session = Depends(get_session),
+    db: AsyncSession = Depends(get_async_session),
 ):
     """Create a new chat template."""
-    template = Templates.insert_new_template(user.id, form_data, db=db)
+    template = await Templates.insert_new_template(user.id, form_data, db=db)
 
     if template:
         return template
@@ -58,10 +58,10 @@ async def create_new_template(
 async def get_template_by_id(
     template_id: str,
     user=Depends(get_verified_user),
-    db: Session = Depends(get_session),
+    db: AsyncSession = Depends(get_async_session),
 ):
     """Get a template by ID."""
-    template = Templates.get_template_by_id(template_id, db=db)
+    template = await Templates.get_template_by_id(template_id, db=db)
 
     if template:
         if template.user_id == user.id or user.role == "admin":
@@ -87,10 +87,10 @@ async def update_template_by_id(
     template_id: str,
     form_data: TemplateForm,
     user=Depends(get_verified_user),
-    db: Session = Depends(get_session),
+    db: AsyncSession = Depends(get_async_session),
 ):
     """Update a template by ID."""
-    template = Templates.get_template_by_id(template_id, db=db)
+    template = await Templates.get_template_by_id(template_id, db=db)
 
     if not template:
         raise HTTPException(
@@ -104,7 +104,7 @@ async def update_template_by_id(
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
 
-    updated_template = Templates.update_template_by_id(template_id, form_data, db=db)
+    updated_template = await Templates.update_template_by_id(template_id, form_data, db=db)
     if updated_template:
         return updated_template
 
@@ -123,10 +123,10 @@ async def update_template_by_id(
 async def delete_template_by_id(
     template_id: str,
     user=Depends(get_verified_user),
-    db: Session = Depends(get_session),
+    db: AsyncSession = Depends(get_async_session),
 ):
     """Delete a template by ID."""
-    template = Templates.get_template_by_id(template_id, db=db)
+    template = await Templates.get_template_by_id(template_id, db=db)
 
     if not template:
         raise HTTPException(
@@ -140,5 +140,5 @@ async def delete_template_by_id(
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
 
-    result = Templates.delete_template_by_id(template_id, db=db)
+    result = await Templates.delete_template_by_id(template_id, db=db)
     return result

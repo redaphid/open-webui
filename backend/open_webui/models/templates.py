@@ -2,12 +2,12 @@ import time
 import uuid
 from typing import Optional
 
-from sqlalchemy.orm import Session
-from open_webui.internal.db import Base, get_db_context
+from open_webui.internal.db import Base, get_async_db_context
 from open_webui.models.users import Users, UserResponse
 
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import BigInteger, Column, String, Text, JSON
+from sqlalchemy import BigInteger, Column, String, Text, JSON, delete, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 ####################
@@ -61,8 +61,8 @@ class TemplateForm(BaseModel):
 
 
 class TemplatesTable:
-    def insert_new_template(
-        self, user_id: str, form_data: TemplateForm, db: Optional[Session] = None
+    async def insert_new_template(
+        self, user_id: str, form_data: TemplateForm, db: Optional[AsyncSession] = None
     ) -> Optional[TemplateModel]:
         template_id = str(uuid.uuid4())
         timestamp = int(time.time())
@@ -79,11 +79,11 @@ class TemplatesTable:
         )
 
         try:
-            with get_db_context(db) as db:
+            async with get_async_db_context(db) as session:
                 result = Template(**template.model_dump())
-                db.add(result)
-                db.commit()
-                db.refresh(result)
+                session.add(result)
+                await session.commit()
+                await session.refresh(result)
                 if result:
                     return TemplateModel.model_validate(result)
                 else:
@@ -91,25 +91,30 @@ class TemplatesTable:
         except Exception:
             return None
 
-    def get_template_by_id(
-        self, template_id: str, db: Optional[Session] = None
+    async def get_template_by_id(
+        self, template_id: str, db: Optional[AsyncSession] = None
     ) -> Optional[TemplateModel]:
         try:
-            with get_db_context(db) as db:
-                template = db.query(Template).filter_by(id=template_id).first()
+            async with get_async_db_context(db) as session:
+                template = await session.get(Template, template_id)
                 if template:
                     return TemplateModel.model_validate(template)
                 return None
         except Exception:
             return None
 
-    def get_templates(self, db: Optional[Session] = None) -> list[TemplateUserResponse]:
-        with get_db_context(db) as db:
-            all_templates = db.query(Template).order_by(Template.updated_at.desc()).all()
+    async def get_templates(
+        self, user_id: Optional[str] = None, db: Optional[AsyncSession] = None
+    ) -> list[TemplateUserResponse]:
+        async with get_async_db_context(db) as session:
+            query = select(Template).order_by(Template.updated_at.desc())
+            if user_id is not None:
+                query = query.where(Template.user_id == user_id)
+            all_templates = (await session.execute(query)).scalars().all()
 
             user_ids = list(set(template.user_id for template in all_templates))
 
-            users = Users.get_users_by_user_ids(user_ids, db=db) if user_ids else []
+            users = await Users.get_users_by_user_ids(user_ids, db=session) if user_ids else []
             users_dict = {user.id: user for user in users}
 
             templates = []
@@ -126,18 +131,17 @@ class TemplatesTable:
 
             return templates
 
-    def get_templates_by_user_id(
-        self, user_id: str, db: Optional[Session] = None
+    async def get_templates_by_user_id(
+        self, user_id: str, db: Optional[AsyncSession] = None
     ) -> list[TemplateUserResponse]:
-        templates = self.get_templates(db=db)
-        return [template for template in templates if template.user_id == user_id]
+        return await self.get_templates(user_id=user_id, db=db)
 
-    def update_template_by_id(
-        self, template_id: str, form_data: TemplateForm, db: Optional[Session] = None
+    async def update_template_by_id(
+        self, template_id: str, form_data: TemplateForm, db: Optional[AsyncSession] = None
     ) -> Optional[TemplateModel]:
         try:
-            with get_db_context(db) as db:
-                template = db.query(Template).filter_by(id=template_id).first()
+            async with get_async_db_context(db) as session:
+                template = await session.get(Template, template_id)
                 if not template:
                     return None
                 template.name = form_data.name
@@ -146,18 +150,19 @@ class TemplatesTable:
                 template.tool_ids = form_data.tool_ids or []
                 template.feature_ids = form_data.feature_ids or []
                 template.updated_at = int(time.time())
-                db.commit()
+                await session.commit()
+                await session.refresh(template)
                 return TemplateModel.model_validate(template)
         except Exception:
             return None
 
-    def delete_template_by_id(
-        self, template_id: str, db: Optional[Session] = None
+    async def delete_template_by_id(
+        self, template_id: str, db: Optional[AsyncSession] = None
     ) -> bool:
         try:
-            with get_db_context(db) as db:
-                db.query(Template).filter_by(id=template_id).delete()
-                db.commit()
+            async with get_async_db_context(db) as session:
+                await session.execute(delete(Template).where(Template.id == template_id))
+                await session.commit()
                 return True
         except Exception:
             return False
