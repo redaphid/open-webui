@@ -25,10 +25,10 @@ ARG GID=0
 
 ######## WebUI frontend ########
 FROM --platform=$BUILDPLATFORM node:22-alpine3.20 AS build
-ARG BUILD_HASH
 
 # Set Node.js options (heap limit Allocation failed - JavaScript heap out of memory)
-# ENV NODE_OPTIONS="--max-old-space-size=4096"
+# Fork: set here rather than patched in by CI, so local builds don't OOM in vite build.
+ENV NODE_OPTIONS="--max-old-space-size=12288"
 
 WORKDIR /app
 
@@ -39,6 +39,9 @@ COPY package.json package-lock.json ./
 RUN npm ci --force
 
 COPY . .
+# Declared after npm ci on purpose: a changed ARG invalidates every RUN after
+# its declaration, so declaring it earlier reinstalls all packages per commit.
+ARG BUILD_HASH
 ENV APP_BUILD_HASH=${BUILD_HASH}
 RUN npm run build
 

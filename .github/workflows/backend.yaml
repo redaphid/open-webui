@@ -1,5 +1,5 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Backend CI — Python formatting checks via Ruff
+# Backend CI — Python logic checks via Ruff (fork: formatting is not enforced)
 # Runs on pushes and PRs to main/dev when backend files change
 # ─────────────────────────────────────────────────────────────────────────────
 name: Python CI
@@ -17,9 +17,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # ── Ruff format check across supported Python versions ───────────────────
+  # ── Ruff logic checks (undefined names etc.) across Python versions ──────
   format-check:
-    name: Ruff Format (${{ matrix.python-version }})
+    name: Ruff Checks (${{ matrix.python-version }})
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
@@ -33,11 +33,8 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Install formatter
+      - name: Install ruff
         run: pip install "ruff>=0.15.5"
-
-      - name: Verify formatting
-        run: ruff format --check . --exclude .venv --exclude venv
 
       - name: Detect logic errors
         run: ruff check --select=F --ignore=F401,F403,F405,F541,F811,F841 --output-format=github .
