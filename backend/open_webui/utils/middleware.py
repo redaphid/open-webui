@@ -6168,11 +6168,12 @@ async def streaming_chat_response_handler(response, ctx):
                                     try:
                                         # A new daemon replaces any still running in
                                         # this chat.
-                                        chat_id = metadata.get('chat_id', '')
-                                        for old in daemon_executor.list_daemons(chat_id=chat_id):
+                                        # NOTE(patch): renamed from chat_id - assigning chat_id here made it local to stream_body_handler and broke nested save_current_response_stream() with cannot access free variable chat_id.
+                                        daemon_chat_id = metadata.get('chat_id', '')
+                                        for old in daemon_executor.list_daemons(chat_id=daemon_chat_id):
                                             if old['status'] == 'running':
                                                 log.info(
-                                                    f'Stopping previous daemon {old["daemon_id"]} in chat {chat_id}'
+                                                    f'Stopping previous daemon {old["daemon_id"]} in chat {daemon_chat_id}'
                                                 )
                                                 await daemon_executor.stop_daemon(old['daemon_id'])
 
@@ -6191,7 +6192,7 @@ async def streaming_chat_response_handler(response, ctx):
                                                 else None
                                             ),
                                             user_id=user.id,
-                                            chat_id=chat_id,
+                                            chat_id=daemon_chat_id,
                                             message_id=metadata.get('message_id', ''),
                                             event_emitter=event_emitter,
                                             code_mode_session_id=code_mode_session_id,
